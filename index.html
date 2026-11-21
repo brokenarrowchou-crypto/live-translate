@@ -673,8 +673,9 @@ Return ONLY a JSON array (no prose, no code fence). One object per talk (split a
 Use 24-hour times in the conference's local time. If the year is missing assume ${new Date().getFullYear()}. Skip coffee breaks, lunch and registration unless they are lectures. Keep titles in their original language.`;
   function parseJsonArray(txt){
     const a = txt.indexOf('['), b = txt.lastIndexOf(']');
-    if (a < 0 || b < a) throw new Error('Claude 沒有回傳議程資料');
-    return JSON.parse(txt.slice(a, b + 1)).filter(x => x && x.d && x.s && x.t);
+    if (a < 0 || b < a) throw new Error('Claude 沒有找到議程：' + txt.replace(/\s+/g,' ').slice(0, 160));
+    let arr; try { arr = JSON.parse(txt.slice(a, b + 1)); } catch(e){ throw new Error('議程資料格式不完整（議程可能太長），請改上傳 PDF 或分天貼上'); }
+    return arr.filter(x => x && x.d && x.s && x.t);
   }
   async function parseAgendaText(text, sourceNote){
     if (!claudeKey()) throw new Error('請先設定 Claude API key（解析議程需要 Claude）');
@@ -697,6 +698,7 @@ Use 24-hour times in the conference's local time. If the year is missing assume 
     return parseJsonArray(out);
   }
   function setAgenda(list, note){
+    if (!list.length) throw new Error(`${note}，但沒有找到任何場次。這一頁可能不是完整議程（例如只是大會資訊頁），或網站擋住自動讀取。請改用：在 Chrome 打開議程頁 → Ctrl+A 全選 → Ctrl+C 複製 → 貼到下方文字框；或把議程頁另存成 PDF 上傳。`);
     list.sort((a,b) => startMs(a) - startMs(b) || String(a.r).localeCompare(String(b.r)));
     const before = new Set(agenda.map(sid)), after = new Set(list.map(sid));
     const added = list.filter(x => !before.has(sid(x))).length, removed = agenda.filter(x => !after.has(sid(x))).length;
@@ -709,7 +711,8 @@ Use 24-hour times in the conference's local time. If the year is missing assume 
     try { await fn(); } catch(e){ agMsg('⚠ ' + e.message); } finally { btns.forEach(b => b.disabled = false); } };
   $('agFetch').onclick = busyWrap(async () => { const u = $('agUrl').value.trim(); if (!u) throw new Error('請先貼上議程網址'); LS('lt_agurl', u); setAgenda(await agendaFromUrl(u), '已從網址載入'); });
   $('agReload').onclick = busyWrap(async () => { const u = $('agUrl').value.trim() || LS('lt_agurl'); if (!u) throw new Error('還沒有議程網址，請先貼上網址'); LS('lt_agurl', u); setAgenda(await agendaFromUrl(u), '已重新抓取並更新'); });
-  $('agParse').onclick = busyWrap(async () => { const t = $('agText').value.trim(); if (!t) throw new Error('請先貼上議程文字'); setAgenda(await parseAgendaText(t, 'pasted text'), '已從貼上文字載入'); });
+  $('agParse').onclick = busyWrap(async () => { const t = $('agText').value.trim(); if (!t) throw new Error('請先貼上議程文字');
+    if (/^https?:\/\/\S+$/i.test(t)){ $('agUrl').value = t; $('agText').value = ''; LS('lt_agurl', t); setAgenda(await agendaFromUrl(t), '已從網址載入'); return; } setAgenda(await parseAgendaText(t, 'pasted text'), '已從貼上文字載入'); });
   $('agFile').onchange = busyWrap(async () => { const f = $('agFile').files[0]; if (!f) return; $('agFile').value = '';
     agMsg('讀取檔案中…'); const text = /\.pdf$/i.test(f.name) ? await pdfToText(await f.arrayBuffer()) : htmlToText(await f.text());
     setAgenda(await parseAgendaText(text, f.name), `已從 ${f.name} 載入`); });
