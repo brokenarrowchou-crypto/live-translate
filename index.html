@@ -42,6 +42,22 @@
   #slideNav{position:absolute;bottom:8px;right:10px;display:flex;gap:6px;align-items:center;background:#000a;padding:4px 8px;border-radius:8px;font-size:13px;opacity:.35}
   #slideNav:hover{opacity:1} #slideNav button{padding:2px 9px}
   body.clean header,body.clean #keyBox,body.clean #typeRow{display:none!important}
+  #agPanel{display:none;position:fixed;inset:0;z-index:20;background:#000a;align-items:center;justify-content:center}
+  #agPanel.open{display:flex}
+  #agBox{width:min(980px,96vw);max-height:92vh;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  #agBox .hd{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);font-weight:700}
+  #agBox .src{padding:12px 16px;display:grid;gap:8px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted)}
+  #agBox .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  #agBox input[type=url],#agBox textarea{flex:1;min-width:240px;font:inherit;font-size:13px;color:var(--text);background:#14121c;border:1px solid var(--line);border-radius:8px;padding:7px}
+  #agBox textarea{height:60px;resize:vertical}
+  #agList{overflow-y:auto;padding:8px 16px 16px}
+  .agDay{margin:14px 0 6px;font-weight:700;color:var(--accent)}
+  .agItem{display:grid;grid-template-columns:110px 120px 1fr auto;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin:6px 0;font-size:14px}
+  .agItem.now{border-color:var(--ok);background:#12261c}
+  .agItem.sel{border-color:#8a5cf6;background:#21183a}
+  .agItem .tm{color:var(--muted);font-variant-numeric:tabular-nums}.agItem .rm{color:#7fb6ff}
+  .agItem .sp{color:var(--muted);font-size:12px}
+  #agPick{display:none;margin:8px 0;padding:10px 12px;border:1px solid var(--ok);border-radius:10px;background:#12261c;color:var(--text)}
   #cleanExit{display:none;position:fixed;top:6px;right:8px;z-index:9;opacity:.25;font-size:12px;padding:3px 8px}
   body.clean #cleanExit{display:block}
   .cols-head{position:sticky;top:-16px;z-index:2;display:grid;grid-template-columns:1fr 1fr;gap:18px;background:var(--bg);padding:8px 0;border-bottom:2px solid var(--line);font-size:14px;font-weight:700}
@@ -94,6 +110,8 @@
   <button id="togSrc">原文 ✓</button>
   <button id="slideBtn">📊 載入簡報</button><input id="slideFile" type="file" accept=".pptx,.pdf" hidden>
   <button id="cleanBtn">隱藏工具列</button>
+  <button id="agBtn" title="上傳議程 PDF 或貼上網址，依時間自動對應場次">📅 議程</button>
+  <span id="agNow" style="font-size:13px;color:#ffd98a;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="點這裡選擇場次"></span>
   <button id="keyBtn">🔑 Claude</button>
   <input id="course" placeholder="課堂名稱（選填）" title="存檔檔名會用：西元日期＋課堂名稱" style="width:170px;font:inherit;font-size:14px;color:var(--text);background:#14121c;border:1px solid var(--line);border-radius:8px;padding:6px 8px">
   <button id="md">💾 存 .md</button>
@@ -120,11 +138,24 @@
         2. 「📊 載入簡報」選 .pdf 或 .pptx（也可直接拖進來）：左邊投影片，右邊翻譯。← → 或簡報筆翻頁，按 H 隱藏工具列。<br>
         3. 「🔑 Claude」貼上 Anthropic API key，就會有 Claude 與 Google 兩個翻譯框；沒填只顯示 Google。<br>
         4. 分頁要保持在前景；收音中斷會自動重新開始。<br>
+        6. 「📅 議程」上傳議程 PDF、貼網址或貼文字，網站會依裝置時間自動切到正在進行的場次（同時多場會請你選），🔄 Reload 可依網址抓最新議程。<br>
         5. 開始收音時同步錄音；按「🏁 本課堂結束」會自動下載錄音檔與文字稿，檔名為「西元日期_課堂名稱」，沒填課堂名稱則為「日期_時間」。
       </div></main></section>
     <section class="frame" id="fG"><div class="fh g">Google 翻譯</div><main id="outG"></main></section>
   </div>
 </div>
+<div id="agPanel"><div id="agBox">
+  <div class="hd">📅 議程與場次 <span id="agInfo" style="font-weight:400;font-size:13px;color:var(--muted)"></span><div class="spacer"></div>
+    <label style="font-weight:400;font-size:13px"><input type="checkbox" id="agAuto" checked> 依裝置時間自動切換場次</label>
+    <button id="agClose">關閉</button></div>
+  <div class="src">
+    <div class="row">議程網址：<input type="url" id="agUrl" placeholder="https://… 議程頁或議程 PDF 的網址"><button id="agFetch">讀取網址</button><button id="agReload" title="依網址重新抓取最新議程並更新">🔄 Reload</button></div>
+    <div class="row">或上傳議程 PDF：<input type="file" id="agFile" accept=".pdf,.txt,.html,.htm"><span style="flex:1"></span>或貼上議程文字：</div>
+    <div class="row"><textarea id="agText" placeholder="從議程網頁或 PDF 複製整段文字貼在這裡"></textarea><button id="agParse">解析貼上的文字</button></div>
+    <div id="agMsg" style="color:#ffd98a"></div>
+  </div>
+  <div id="agList"><div id="agPick"></div><div id="agItems" style="color:var(--muted)">尚未載入議程。解析議程需要先設定 Claude API key。</div></div>
+</div></div>
 <button id="cleanExit">顯示工具列 (H)</button>
 <div id="partial"><b>聆聽中</b><span id="pt">—</span></div>
 <div id="toast"></div>
@@ -391,6 +422,18 @@ zrender/lib/zrender.js:
   if (!claudeKey()) $('keyBox').classList.add('open');
   const tgtName = () => ({'zh-TW':'Taiwan Traditional Chinese (台灣繁體中文, Taiwan wording, never Simplified)','zh-CN':'Simplified Chinese','en':'English','ko':'Korean','ja':'Japanese'})[$('tgt').value];
   const srcName = () => ({'ko-KR':'Korean','en-US':'English','ja-JP':'Japanese','zh-TW':'Chinese'})[$('src').value];
+  async function claudeCall(prompt, {model, maxTokens = 1000, tools} = {}){
+    const body = {model: model || $('model').value, max_tokens: maxTokens, messages: [{role:'user', content: prompt}]};
+    if (tools) body.tools = tools;
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {'x-api-key': claudeKey(), 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true'},
+      body: JSON.stringify(body)
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+    return (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('').trim();
+  }
   async function claudeTranslate(text){
     const topic = $('topic').value.trim();
     const prior = ctx.slice(-3).map(c => `SRC: ${c.src}\nOUT: ${c.tr}`).join('\n');
@@ -596,6 +639,135 @@ ${text}`;
   });
   let rsT; new ResizeObserver(() => { clearTimeout(rsT); rsT = setTimeout(renderDeck, 250); }).observe($('stage'));
 
+  // ---------- agenda ----------
+  const agMsg = t => $('agMsg').textContent = t || '';
+  let agenda = []; try { agenda = JSON.parse(LS('lt_agenda') || '[]'); } catch(e){ agenda = []; }
+  let agSel = null; try { agSel = JSON.parse(LS('lt_agsel') || 'null'); } catch(e){}
+  let agRoom = LS('lt_agroom');
+  $('agUrl').value = LS('lt_agurl');
+  $('agAuto').checked = LS('lt_agauto') !== 'off';
+  $('agAuto').onchange = e => { LS('lt_agauto', e.target.checked ? 'on' : 'off'); agTick(); };
+  const openAg = () => { $('agPanel').classList.add('open'); renderAgenda(); };
+  $('agBtn').onclick = openAg; $('agNow').onclick = openAg;
+  $('agClose').onclick = () => $('agPanel').classList.remove('open');
+  $('agPanel').onclick = e => { if (e.target.id === 'agPanel') $('agPanel').classList.remove('open'); };
+
+  const sid = x => [x.d, x.s, x.r, x.t].join('|');
+  const toMs = (d, hm) => { if (!d || !hm) return NaN; const [Y,M,D] = d.split('-').map(Number), [h,m] = hm.split(':').map(Number); return new Date(Y, M-1, D, h, m).getTime(); };
+  const startMs = x => toMs(x.d, x.s);
+  const endMs = x => { const e = toMs(x.d, x.e); return isNaN(e) ? startMs(x) + 30*60000 : e; };
+
+  async function pdfToText(buf){
+    const pdf = await pdfjsLib.getDocument({data: new Uint8Array(buf)}).promise; let out = '';
+    for (let i = 1; i <= pdf.numPages; i++){
+      const tc = await (await pdf.getPage(i)).getTextContent();
+      out += `\n--- page ${i} ---\n` + tc.items.map(it => it.str + (it.hasEOL ? '\n' : ' ')).join('');
+    }
+    return out;
+  }
+  const htmlToText = h => { const d = new DOMParser().parseFromString(h, 'text/html'); d.querySelectorAll('script,style,noscript').forEach(n => n.remove()); return (d.body ? d.body.innerText || d.body.textContent : h); };
+
+  const AG_PROMPT = `Extract every session/talk from this academic conference agenda.
+Return ONLY a JSON array (no prose, no code fence). One object per talk (split a symposium into its individual talks when times are given):
+{"d":"YYYY-MM-DD","s":"HH:MM","e":"HH:MM","r":"room/hall name","t":"talk title","p":"speaker (affiliation)","l":"spoken language code if stated or obvious (en/ko/zh/ja) else empty","k":"5-10 key medical terms, comma separated"}
+Use 24-hour times in the conference's local time. If the year is missing assume ${new Date().getFullYear()}. Skip coffee breaks, lunch and registration unless they are lectures. Keep titles in their original language.`;
+  function parseJsonArray(txt){
+    const a = txt.indexOf('['), b = txt.lastIndexOf(']');
+    if (a < 0 || b < a) throw new Error('Claude 沒有回傳議程資料');
+    return JSON.parse(txt.slice(a, b + 1)).filter(x => x && x.d && x.s && x.t);
+  }
+  async function parseAgendaText(text, sourceNote){
+    if (!claudeKey()) throw new Error('請先設定 Claude API key（解析議程需要 Claude）');
+    agMsg(`Claude 解析議程中…（約 ${Math.max(20, Math.round(text.length / 2000))} 秒）`);
+    const out = await claudeCall(`${AG_PROMPT}\n\nAGENDA (${sourceNote}):\n${text.slice(0, 180000)}`, {model:'claude-sonnet-5-5', maxTokens:16000});
+    return parseJsonArray(out);
+  }
+  async function agendaFromUrl(url){
+    // 1) 瀏覽器直接讀（網站允許時最快）；2) 不行就請 Claude 的 web fetch 代為讀取
+    try {
+      const r = await fetch(url); if (!r.ok) throw new Error('HTTP ' + r.status);
+      const ct = r.headers.get('content-type') || '';
+      const text = ct.includes('pdf') || /\.pdf($|\?)/i.test(url) ? await pdfToText(await r.arrayBuffer()) : htmlToText(await r.text());
+      if (text.trim().length > 200) return await parseAgendaText(text, url);
+    } catch(e){ /* 多半是跨網域限制，改用 Claude 讀取 */ }
+    if (!claudeKey()) throw new Error('這個網址瀏覽器無法直接讀取，需要 Claude API key 代為讀取');
+    agMsg('網站不允許直接讀取，改請 Claude 代為讀取網址並解析（約 30–90 秒）…');
+    const out = await claudeCall(`${AG_PROMPT}\n\nFetch the agenda at ${url} (follow obvious links to the full program / day pages if this page only links to them) and extract all sessions.`,
+      {model:'claude-sonnet-5-5', maxTokens:16000, tools:[{type:'web_fetch_20250910', name:'web_fetch', max_uses:8}]});
+    return parseJsonArray(out);
+  }
+  function setAgenda(list, note){
+    list.sort((a,b) => startMs(a) - startMs(b) || String(a.r).localeCompare(String(b.r)));
+    const before = new Set(agenda.map(sid)), after = new Set(list.map(sid));
+    const added = list.filter(x => !before.has(sid(x))).length, removed = agenda.filter(x => !after.has(sid(x))).length;
+    agenda = list; LS('lt_agenda', JSON.stringify(agenda)); LS('lt_agtime', String(Date.now()));
+    agMsg(`${note}：共 ${agenda.length} 場` + (before.size ? `（新增 ${added}、移除 ${removed}）` : ''));
+    if (agSel && !after.has(sid(agSel))) { agSel = null; LS('lt_agsel', 'null'); }
+    renderAgenda(); agTick(true);
+  }
+  const busyWrap = fn => async () => { const btns = ['agFetch','agReload','agParse'].map($); btns.forEach(b => b.disabled = true);
+    try { await fn(); } catch(e){ agMsg('⚠ ' + e.message); } finally { btns.forEach(b => b.disabled = false); } };
+  $('agFetch').onclick = busyWrap(async () => { const u = $('agUrl').value.trim(); if (!u) throw new Error('請先貼上議程網址'); LS('lt_agurl', u); setAgenda(await agendaFromUrl(u), '已從網址載入'); });
+  $('agReload').onclick = busyWrap(async () => { const u = $('agUrl').value.trim() || LS('lt_agurl'); if (!u) throw new Error('還沒有議程網址，請先貼上網址'); LS('lt_agurl', u); setAgenda(await agendaFromUrl(u), '已重新抓取並更新'); });
+  $('agParse').onclick = busyWrap(async () => { const t = $('agText').value.trim(); if (!t) throw new Error('請先貼上議程文字'); setAgenda(await parseAgendaText(t, 'pasted text'), '已從貼上文字載入'); });
+  $('agFile').onchange = busyWrap(async () => { const f = $('agFile').files[0]; if (!f) return; $('agFile').value = '';
+    agMsg('讀取檔案中…'); const text = /\.pdf$/i.test(f.name) ? await pdfToText(await f.arrayBuffer()) : htmlToText(await f.text());
+    setAgenda(await parseAgendaText(text, f.name), `已從 ${f.name} 載入`); });
+
+  const esc = t => String(t || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function renderAgenda(){
+    const t = Number(LS('lt_agtime')); $('agInfo').textContent = agenda.length ? `${agenda.length} 場｜更新於 ${t ? new Date(t).toLocaleString('zh-TW', {hour12:false}) : '-'}` : '';
+    if (!agenda.length){ $('agItems').innerHTML = '尚未載入議程。解析議程需要先設定 Claude API key。'; return; }
+    const now = Date.now(); let html = '', day = '';
+    for (const x of agenda){
+      if (x.d !== day){ day = x.d; html += `<div class="agDay">${esc(day)}</div>`; }
+      const on = startMs(x) <= now && now < endMs(x), sel = agSel && sid(agSel) === sid(x);
+      html += `<div class="agItem${on ? ' now' : ''}${sel ? ' sel' : ''}" data-id="${esc(sid(x))}"><span class="tm">${esc(x.s)}–${esc(x.e || '')}</span><span class="rm">${esc(x.r)}</span><span><b>${esc(x.t)}</b><br><span class="sp">${esc(x.p)}${x.l ? '｜' + esc(x.l) : ''}</span></span><button>${sel ? '✓ 使用中' : '選這場'}</button></div>`;
+    }
+    $('agItems').innerHTML = html;
+    $('agItems').querySelectorAll('.agItem button').forEach(b => b.onclick = () => { const id = b.closest('.agItem').dataset.id; const x = agenda.find(y => sid(y) === id); if (x) applySession(x, true); });
+    const cur = $('agItems').querySelector('.agItem.now, .agItem.sel'); if (cur && $('agPanel').classList.contains('open')) cur.scrollIntoView({block:'center'});
+  }
+  const LANG = {en:'en-US', ko:'ko-KR', ja:'ja-JP', zh:'zh-TW'};
+  async function applySession(x, manual){
+    const changing = !agSel || sid(agSel) !== sid(x);
+    if (changing && (segs.length || mr)){
+      if (manual && !confirm(`切換到「${x.t}」？\n目前這堂會先自動存檔（錄音＋文字稿）。`)) return;
+      const wasRunning = running; await endClass(true);
+      document.querySelectorAll('#frames .seg').forEach(e => e.remove()); segs.length = 0; ctx.length = 0; t0 = 0;
+      agSel = x; fillSession(x);
+      if (wasRunning) startRec();     // 自動接續下一場收音與錄音
+    } else { agSel = x; fillSession(x); }
+    agRoom = x.r; LS('lt_agroom', agRoom); LS('lt_agsel', JSON.stringify(agSel));
+    $('agPick').style.display = 'none'; renderAgenda(); updNow();
+    if (manual) $('agPanel').classList.remove('open');
+  }
+  function fillSession(x){
+    $('course').value = `${x.r ? x.r + '_' : ''}${x.t}`.slice(0, 80); LS('lt_course', $('course').value);
+    $('topic').value = [x.t, x.p, x.k].filter(Boolean).join('；'); LS('lt_topic', $('topic').value);
+    if (x.l && LANG[x.l] && $('src').value !== LANG[x.l]){ $('src').value = LANG[x.l]; $('src').onchange(); }
+    toast(`場次：${x.s} ${x.r}｜${x.t}`);
+  }
+  function updNow(){ $('agNow').textContent = agSel ? `📍 ${agSel.s} ${agSel.r}｜${agSel.t}` : (agenda.length ? '📍 點此選擇場次' : ''); }
+  let lastAsked = '';
+  function agTick(force){
+    updNow(); if (!agenda.length || !$('agAuto').checked) return;
+    const now = Date.now();
+    if (agSel && startMs(agSel) <= now && now < endMs(agSel) && !force) return;      // 目前場次還在進行
+    const live = agenda.filter(x => startMs(x) <= now && now < endMs(x));
+    if (!live.length) return;
+    const sameRoom = live.filter(x => agRoom && x.r === agRoom);
+    if (live.length === 1) return applySession(live[0], false);
+    if (sameRoom.length === 1) return applySession(sameRoom[0], false);               // 同時段多場：沿用使用者上次選的會議室
+    const key = live.map(sid).join('#'); if (key === lastAsked && !force) return; lastAsked = key;
+    // 同時段有多場且無法判斷 → 請使用者選
+    $('agPick').innerHTML = `<b>現在同時有 ${live.length} 場，請選擇你在哪一場：</b><br>` + live.map((x, i) => `<button data-i="${i}" style="margin:6px 6px 0 0">${esc(x.s)} ${esc(x.r)}｜${esc(x.t)}</button>`).join('');
+    $('agPick').style.display = 'block';
+    $('agPick').querySelectorAll('button').forEach(b => b.onclick = () => applySession(live[+b.dataset.i], true));
+    $('agPanel').classList.add('open'); renderAgenda(); $('agList').scrollTop = 0;
+  }
+  setInterval(agTick, 30000); setTimeout(() => agTick(), 1500);
+
   // ---------- export ----------
   $('clear').onclick = () => { if (segs.length && !confirm('清除畫面上的逐字稿？（錄音不受影響）')) return; document.querySelectorAll('#frames .seg').forEach(e=>e.remove()); segs.length=0; ctx.length=0; saved = true; if (!mr) t0 = running ? Date.now() : 0; };
   function baseName(){
@@ -622,9 +794,9 @@ ${text}`;
     download(new Blob([buildMd()], {type:'text/markdown'}), baseName() + '.md'); toast('已下載 .md');
   };
   let saved = true;
-  $('endBtn').onclick = async () => {
-    if (!segs.length && !mr){ toast('這堂課還沒有開始收音'); return; }
-    if (!confirm('確定結束本課堂？會停止收音，並自動下載錄音檔與文字稿。')) return;
+  async function endClass(silent){
+    if (!segs.length && !mr){ if (!silent) toast('這堂課還沒有開始收音'); return false; }
+    if (!silent && !confirm('確定結束本課堂？會停止收音，並自動下載錄音檔與文字稿。')) return false;
     stopRec();
     const audio = await stopAudio();
     const base = baseName();
@@ -633,7 +805,9 @@ ${text}`;
     saved = true;
     toast(`已存檔：${base}.md${audio && audio.size ? ` 與 ${base}.${audioExt}` : ''}（在「下載」資料夾）`);
     setSt('本課堂已結束並存檔');
-  };
+    return true;
+  }
+  $('endBtn').onclick = () => endClass(false);
   const markDirty = () => { saved = false; };
   new MutationObserver(markDirty).observe($('outG'), {childList:true});
   window.addEventListener('beforeunload', e => { if (!saved || (mr && mr.state === 'recording')){ e.preventDefault(); e.returnValue = ''; } });
