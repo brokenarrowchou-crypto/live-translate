@@ -717,7 +717,7 @@ Use 24-hour times in the conference's local time. If the year is missing assume 
   const esc = t => String(t || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   function renderAgenda(){
     const t = Number(LS('lt_agtime')); $('agInfo').textContent = agenda.length ? `${agenda.length} 場｜更新於 ${t ? new Date(t).toLocaleString('zh-TW', {hour12:false}) : '-'}` : '';
-    if (!agenda.length){ $('agItems').innerHTML = '尚未載入議程。解析議程需要先設定 Claude API key。'; return; }
+    if (!agenda.length){ $('agItems').innerHTML = claudeKey() ? '尚未載入議程。請貼網址、上傳 PDF 或貼上議程文字。' : '⚠ 尚未設定 Claude API key：按上方「🔑 Claude」貼上 key 並按「儲存」，才能解析議程。'; return; }
     const now = Date.now(); let html = '', day = '';
     for (const x of agenda){
       if (x.d !== day){ day = x.d; html += `<div class="agDay">${esc(day)}</div>`; }
