@@ -683,17 +683,61 @@ Use 24-hour times in the conference's local time. If the year is missing assume 
     const out = await claudeCall(`${AG_PROMPT}\n\nAGENDA (${sourceNote}):\n${text.slice(0, 180000)}`, {model:'claude-sonnet-5-5', maxTokens:16000});
     return parseJsonArray(out);
   }
+  // 讀網址：依序嘗試 ①瀏覽器直接讀 ②公開讀取服務（繞過跨網域限制） ③Claude web fetch
+  // 讀到的頁面若只是資訊頁，會自動跟進看起來像議程（Program / Schedule / 프로그램 / 일정）的連結
+  async function fetchRaw(url){
+    const routes = [
+      ['直接讀取', u => u],
+      ['讀取服務 A', u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u)],
+      ['讀取服務 B', u => 'https://corsproxy.io/?url=' + encodeURIComponent(u)],
+      ['讀取服務 C', u => 'https://r.jina.ai/' + u]
+    ];
+    for (const [name, wrap] of routes){
+      try {
+        const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 20000);
+        const r = await fetch(wrap(url), {signal: ctl.signal}); clearTimeout(tm);
+        if (!r.ok) continue;
+        const ct = r.headers.get('content-type') || '';
+        if (ct.includes('pdf') || /\.pdf($|\?)/i.test(url)) return {kind:'pdf', buf: await r.arrayBuffer(), via:name};
+        const body = await r.text();
+        if (body && body.trim().length > 200) return {kind: name === '讀取服務 C' ? 'text' : 'html', body, via:name};
+      } catch(e){ /* 換下一個方式 */ }
+    }
+    return null;
+  }
+  const PROG_RE = /program|programme|schedule|timetable|agenda|scientific|session|day\s*\d|프로그램|일정|시간표|日程|議程/i;
+  async function readUrlText(url){
+    const raw = await fetchRaw(url); if (!raw) return null;
+    if (raw.kind === 'pdf') return {text: await pdfToText(raw.buf), via: raw.via, pages: 1};
+    if (raw.kind === 'text') return {text: raw.body, via: raw.via, pages: 1};
+    let text = htmlToText(raw.body), pages = 1;
+    // 跟進同網站的議程相關連結（最多 6 頁）
+    const doc = new DOMParser().parseFromString(raw.body, 'text/html'), base = new URL(url), seen = new Set([url]), links = [];
+    doc.querySelectorAll('a[href], area[href], option[value]').forEach(a => {
+      const href = a.getAttribute('href') || a.getAttribute('value') || ''; if (!href || href.startsWith('#') || /^(javascript|mailto|tel):/i.test(href)) return;
+      let u; try { u = new URL(href, base).href.split('#')[0]; } catch(e){ return; }
+      if (new URL(u).host !== base.host || seen.has(u)) return;
+      if (PROG_RE.test((a.textContent || '') + ' ' + href)){ seen.add(u); links.push(u); }
+    });
+    for (const u of links.slice(0, 6)){
+      agMsg(`讀取議程子頁（${pages}/${Math.min(links.length, 6)}）：${u}`);
+      const sub = await fetchRaw(u); if (!sub) continue;
+      text += `\n\n===== ${u} =====\n` + (sub.kind === 'pdf' ? await pdfToText(sub.buf) : sub.kind === 'text' ? sub.body : htmlToText(sub.body));
+      pages++;
+    }
+    return {text, via: raw.via, pages};
+  }
   async function agendaFromUrl(url){
-    // 1) 瀏覽器直接讀（網站允許時最快）；2) 不行就請 Claude 的 web fetch 代為讀取
-    try {
-      const r = await fetch(url); if (!r.ok) throw new Error('HTTP ' + r.status);
-      const ct = r.headers.get('content-type') || '';
-      const text = ct.includes('pdf') || /\.pdf($|\?)/i.test(url) ? await pdfToText(await r.arrayBuffer()) : htmlToText(await r.text());
-      if (text.trim().length > 200) return await parseAgendaText(text, url);
-    } catch(e){ /* 多半是跨網域限制，改用 Claude 讀取 */ }
-    if (!claudeKey()) throw new Error('這個網址瀏覽器無法直接讀取，需要 Claude API key 代為讀取');
-    agMsg('網站不允許直接讀取，改請 Claude 代為讀取網址並解析（約 30–90 秒）…');
-    const out = await claudeCall(`${AG_PROMPT}\n\nFetch the agenda at ${url} (follow obvious links to the full program / day pages if this page only links to them) and extract all sessions.`,
+    agMsg('讀取網址中…');
+    const got = await readUrlText(url);
+    if (got && got.text.trim().length > 200){
+      agMsg(`已用「${got.via}」讀到 ${got.pages} 頁，交給 Claude 解析中…`);
+      const list = await parseAgendaText(got.text, url);
+      if (list.length) return list;
+    }
+    if (!claudeKey()) throw new Error('這個網址無法讀取，且尚未設定 Claude API key');
+    agMsg('改請 Claude 直接上網讀取並解析（約 30–90 秒）…');
+    const out = await claudeCall(`${AG_PROMPT}\n\nFetch the agenda at ${url} (follow obvious links to the full program / day pages if this page only links to them) and extract all sessions. If you cannot fetch it, say why in one sentence.`,
       {model:'claude-sonnet-5-5', maxTokens:16000, tools:[{type:'web_fetch_20250910', name:'web_fetch', max_uses:8}]});
     return parseJsonArray(out);
   }
