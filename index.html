@@ -73,6 +73,12 @@
     <option value="ja-JP">講者：日本語</option>
     <option value="zh-TW">講者：中文</option>
   </select>
+  <select id="cutSel" title="辨識中的句子超過這個長度，就先切一段送去翻譯">
+    <option value="short">斷句：短（最即時）</option>
+    <option value="mid" selected>斷句：中</option>
+    <option value="long">斷句：長（較完整）</option>
+    <option value="off">斷句：關閉</option>
+  </select>
   <select id="tgt">
     <option value="zh-TW">繁體中文（台灣）</option>
     <option value="zh-CN">简体中文</option>
@@ -374,6 +380,7 @@ zrender/lib/zrender.js:
   const ctx = [];
   const LS = (k, v) => { try { if (v === undefined) return localStorage.getItem(k) || ''; localStorage.setItem(k, v); } catch(e){ return ''; } };
   const claudeKey = () => $('key').value.trim();
+  $('cutSel').value = LS('lt_cut') || 'mid'; $('cutSel').onchange = e => LS('lt_cut', e.target.value);
   $('course').value = LS('lt_course'); $('course').oninput = e => LS('lt_course', e.target.value);
   $('key').value = LS('lt_key'); $('model').value = LS('lt_model') || 'claude-haiku-5-5'; $('topic').value = LS('lt_topic');
   $('keyBtn').onclick = () => $('keyBox').classList.toggle('open');
@@ -411,13 +418,41 @@ ${text}`;
   let rec = null, running = false;
   const setSt = (t, live) => { $('st').textContent = t; $('dot').classList.toggle('live', !!live); };
   if (!SR){ setSt('此瀏覽器不支援語音辨識，請用 Chrome'); $('mic').disabled = true; }
+  // ---------- 強制斷句：辨識中的句子太長時，先把前段送去翻譯 ----------
+  let sentMap = {};
+  const CUT = { short:{w:12,c:25}, mid:{w:20,c:40}, long:{w:35,c:70} };
+  const isCJK = () => /^(ko|ja|zh)/.test($('src').value);
+  function forceCut(pending){
+    const mode = $('cutSel').value; if (mode === 'off' || !pending.trim()) return 0;
+    const lim = CUT[mode];
+    if (isCJK()){
+      const t = pending.replace(/\s+$/,'');
+      if (t.length < lim.c) return 0;
+      // 保留最後 6 個字（還可能被辨識修正），其餘在最近的空白或標點處切
+      const end = t.length - 6; let cut = -1;
+      for (let k = end; k >= Math.floor(lim.c * 0.6); k--){ if (/[\s,.?!，。？！、]/.test(t[k])){ cut = k + 1; break; } }
+      return cut > 0 ? cut : end;
+    }
+    const words = pending.trim().split(/\s+/);
+    if (words.length < lim.w) return 0;
+    // 保留最後 3 個字，其餘送出；切在空白處
+    const keep = words.slice(-3).join(' ');
+    const cut = pending.lastIndexOf(keep);
+    return cut > 0 ? cut : 0;
+  }
+
   function startRec(){
     rec = new SR(); rec.lang = $('src').value; rec.continuous = true; rec.interimResults = true;
+    sentMap = {};
     rec.onresult = e => {
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++){
-        const r = e.results[i];
-        if (r.isFinal) addFinal(r[0].transcript); else interim += r[0].transcript;
+        const r = e.results[i], txt = r[0].transcript, sent = sentMap[i] || 0;
+        if (r.isFinal){ addFinal(txt.length > sent ? txt.slice(sent) : ''); delete sentMap[i]; continue; }
+        const pending = txt.length > sent ? txt.slice(sent) : '';
+        const cut = forceCut(pending);
+        if (cut > 0){ addFinal(pending.slice(0, cut)); sentMap[i] = sent + cut; interim += pending.slice(cut); }
+        else interim += pending;
       }
       $('pt').textContent = interim || '—';
     };
