@@ -705,7 +705,7 @@ Use 24-hour times in the conference's local time. If the year is missing assume 
     }
     return null;
   }
-  const PROG_RE = /program|programme|schedule|timetable|agenda|scientific|session|day\s*\d|프로그램|일정|시간표|日程|議程/i;
+  const PROG_RE = /program|programme|sche|timetable|agenda|scientific|day[\s_\-]*\d|\d+(st|nd|rd|th)?\s*(nov|dec|jan|feb|mar|apr|may|jun|jul|aug|sep|oct)|\((mon|tue|wed|thu|fri|sat|sun)|프로그램|일정|시간표|日程|議程/i;
   async function readUrlText(url){
     const raw = await fetchRaw(url); if (!raw) return null;
     if (raw.kind === 'pdf') return {text: await pdfToText(raw.buf), via: raw.via, pages: 1};
@@ -719,7 +719,9 @@ Use 24-hour times in the conference's local time. If the year is missing assume 
       if (new URL(u).host !== base.host || seen.has(u)) return;
       if (PROG_RE.test((a.textContent || '') + ' ' + href)){ seen.add(u); links.push(u); }
     });
-    for (const u of links.slice(0, 6)){
+    // 優先跟進網頁（議程表），摘要 PDF 等檔案放最後
+    links.sort((a, b) => (/\.pdf($|\?)/i.test(a) ? 1 : 0) - (/\.pdf($|\?)/i.test(b) ? 1 : 0));
+    for (const u of (links.some(u => !/\.pdf($|\?)/i.test(u)) ? links.filter(u => !/\.pdf($|\?)/i.test(u)) : links).slice(0, 6)){
       agMsg(`讀取議程子頁（${pages}/${Math.min(links.length, 6)}）：${u}`);
       const sub = await fetchRaw(u); if (!sub) continue;
       text += `\n\n===== ${u} =====\n` + (sub.kind === 'pdf' ? await pdfToText(sub.buf) : sub.kind === 'text' ? sub.body : htmlToText(sub.body));
