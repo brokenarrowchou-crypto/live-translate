@@ -420,6 +420,10 @@ ${text}`;
     rec.onerror = e => {
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed'){ running=false; setSt('麥克風未授權：點網址列左側圖示允許麥克風'); updBtn(); }
       else if (e.error === 'network') setSt('語音辨識需要網路，重新連線中…');
+      else if (e.error === 'audio-capture') setSt('⚠ 抓不到麥克風：請確認 Windows 預設麥克風、或其他程式沒有獨佔');
+      else if (e.error === 'no-speech') setSt('收音中，但沒有聽到說話聲（靠近喇叭或確認語言）', true);
+      else if (e.error === 'language-not-supported') setSt('⚠ 不支援這個講者語言');
+      else setSt('辨識錯誤：' + e.error);
     };
     rec.onend = () => { if (running) { try { rec.start(); } catch(e){ setTimeout(()=>running&&startRec(), 500); } } else { setSt('已停止'); updBtn(); } };
     try { rec.start(); running = true; if (!t0) t0 = Date.now(); setSt(`收音中（${$('src').options[$('src').selectedIndex].text.replace('講者：','')}）`, true); }
