@@ -82,13 +82,16 @@
   </select>
   <button id="mic" class="primary">🎙 開始收音</button>
   <div id="status"><span class="dot" id="dot"></span><span id="st">就緒</span></div>
+  <span id="recInd" style="display:none;font-size:13px;color:var(--warn)">● 錄音 <span id="recTime">00:00</span></span>
   <div class="spacer"></div>
   <button id="down">A−</button><button id="up">A+</button>
   <button id="togSrc">原文 ✓</button>
   <button id="slideBtn">📊 載入簡報</button><input id="slideFile" type="file" accept=".pptx,.pdf" hidden>
   <button id="cleanBtn">隱藏工具列</button>
   <button id="keyBtn">🔑 Claude</button>
+  <input id="course" placeholder="課堂名稱（選填）" title="存檔檔名會用：西元日期＋課堂名稱" style="width:170px;font:inherit;font-size:14px;color:var(--text);background:#14121c;border:1px solid var(--line);border-radius:8px;padding:6px 8px">
   <button id="md">💾 存 .md</button>
+  <button id="endBtn" style="background:#3b1d24;border-color:var(--warn);color:#ffb4a8;font-weight:700">🏁 本課堂結束</button>
   <button id="clear">清除</button>
 </header>
 <div id="keyBox">
@@ -110,7 +113,7 @@
         2. 「📊 載入簡報」選 .pdf 或 .pptx（也可直接拖進來）：左邊投影片，右邊翻譯。← → 或簡報筆翻頁，按 H 隱藏工具列。<br>
         3. 「🔑 Claude」貼上 Anthropic API key，就會有 Claude 與 Google 兩個翻譯框；沒填只顯示 Google。<br>
         4. 分頁要保持在前景；收音中斷會自動重新開始。<br>
-        5. 結束按「💾 存 .md」下載逐字稿（含時間戳、原文、兩種譯文）。
+        5. 開始收音時同步錄音；按「🏁 本課堂結束」會自動下載錄音檔與文字稿，檔名為「西元日期_課堂名稱」，沒填課堂名稱則為「日期_時間」。
       </div></main></section>
     <section class="frame" id="fG"><div class="fh g">Google 翻譯</div><main id="outG"></main></section>
   </div>
@@ -371,6 +374,7 @@ zrender/lib/zrender.js:
   const ctx = [];
   const LS = (k, v) => { try { if (v === undefined) return localStorage.getItem(k) || ''; localStorage.setItem(k, v); } catch(e){ return ''; } };
   const claudeKey = () => $('key').value.trim();
+  $('course').value = LS('lt_course'); $('course').oninput = e => LS('lt_course', e.target.value);
   $('key').value = LS('lt_key'); $('model').value = LS('lt_model') || 'claude-haiku-5-5'; $('topic').value = LS('lt_topic');
   $('keyBtn').onclick = () => $('keyBox').classList.toggle('open');
   $('keySave').onclick = () => { LS('lt_key', claudeKey()); LS('lt_model', $('model').value); LS('lt_topic', $('topic').value); $('keyBox').classList.remove('open'); updClaude(); toast(claudeKey() ? 'Claude 翻譯已啟用' : '已清除 API key'); };
@@ -426,11 +430,36 @@ ${text}`;
       else setSt('辨識錯誤：' + e.error);
     };
     rec.onend = () => { if (running) { try { rec.start(); } catch(e){ setTimeout(()=>running&&startRec(), 500); } } else { setSt('已停止'); updBtn(); } };
+    startAudio();
     try { rec.start(); running = true; if (!t0) t0 = Date.now(); setSt(`收音中（${$('src').options[$('src').selectedIndex].text.replace('講者：','')}）`, true); }
     catch(e){ setSt('無法開始收音'); }
     updBtn();
   }
   function stopRec(){ running = false; try { rec && rec.stop(); } catch(e){} }
+  // ---------- audio recording (MediaRecorder, runs from first 開始收音 until 本課堂結束) ----------
+  let media = null, mr = null, chunks = [], recStart = 0, recTimer = null, audioExt = 'webm';
+  async function startAudio(){
+    if (mr && mr.state !== 'inactive') return;
+    try {
+      media = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:true}});
+      const type = ['audio/webm;codecs=opus','audio/webm','audio/mp4'].find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
+      audioExt = type.includes('mp4') ? 'm4a' : 'webm';
+      mr = new MediaRecorder(media, type ? {mimeType:type, audioBitsPerSecond:48000} : undefined);
+      chunks = []; mr.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+      mr.start(10000);                       // 每 10 秒寫一段，避免長時間錄音資料遺失
+      recStart = Date.now(); if (!t0) t0 = recStart; else t0 = Math.min(t0, recStart);
+      $('recInd').style.display = '';
+      recTimer = setInterval(() => { const sec = Math.round((Date.now()-recStart)/1000); $('recTime').textContent = `${pad(Math.floor(sec/3600))}:${pad(Math.floor(sec/60)%60)}:${pad(sec%60)}`; }, 1000);
+    } catch(e){ toast('無法錄音（只會存文字稿）：' + e.message); }
+  }
+  function stopAudio(){
+    return new Promise(res => {
+      clearInterval(recTimer); $('recInd').style.display = 'none';
+      if (!mr || mr.state === 'inactive'){ res(null); return; }
+      mr.onstop = () => { const b = new Blob(chunks, {type: mr.mimeType || 'audio/webm'}); media && media.getTracks().forEach(t => t.stop()); mr = null; media = null; res(b); };
+      mr.stop();
+    });
+  }
   const updBtn = () => { $('mic').classList.toggle('on', running); $('mic').textContent = running ? '⏹ 停止收音' : '🎙 開始收音'; };
   $('mic').onclick = () => { if (running) stopRec(); else { getTranslator(); startRec(); } };
   document.addEventListener('visibilitychange', () => { if (document.hidden && running) setSt('分頁在背景，可能暫停收音'); });
@@ -533,16 +562,46 @@ ${text}`;
   let rsT; new ResizeObserver(() => { clearTimeout(rsT); rsT = setTimeout(renderDeck, 250); }).observe($('stage'));
 
   // ---------- export ----------
-  $('clear').onclick = () => { document.querySelectorAll('#frames .seg').forEach(e=>e.remove()); segs.length=0; ctx.length=0; t0 = running ? Date.now() : 0; };
+  $('clear').onclick = () => { if (segs.length && !confirm('清除畫面上的逐字稿？（錄音不受影響）')) return; document.querySelectorAll('#frames .seg').forEach(e=>e.remove()); segs.length=0; ctx.length=0; saved = true; if (!mr) t0 = running ? Date.now() : 0; };
+  function baseName(){
+    const d = new Date(t0 || Date.now());
+    const ymd = `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`;
+    const name = $('course').value.trim().replace(/[\\/:*?"<>|\n\r]+/g,' ').replace(/\s+/g,' ').slice(0,60);
+    return name ? `${ymd}_${name}` : `${ymd}_${pad(d.getHours())}${pad(d.getMinutes())}`;
+  }
+  function buildMd(){
+    const d = new Date(t0||Date.now());
+    const title = $('course').value.trim() || `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const L = [`# ${title}`, '', `- 日期：${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`, `- 收音開始：${t0?clock(t0):'-'}`, `- 演講主題：${$('topic').value.trim() || '-'}`,
+      `- 語言：${$('src').options[$('src').selectedIndex].text.replace('講者：','')} → ${$('tgt').options[$('tgt').selectedIndex].text}`, `- 句數：${segs.length}`,
+      `- 時間戳格式：[實際時間｜錄音檔中的位置]`, '', '---', ''];
+    for (const s of segs){ L.push(`**[${clock(s.t)}｜${rel(s.t)}]**  `, `- Claude：${s.cl || '-'}${s.cms?`（${(s.cms/1000).toFixed(1)}s）`:''}`, `- Google：${s.tr || '-'}${s.ms?`（${(s.ms/1000).toFixed(1)}s）`:''}`, '', `> ${s.src}`, ''); }
+    return L.join('\n');
+  }
+  function download(blob, filename){
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  }
   $('md').onclick = () => {
     if (!segs.length){ toast('還沒有逐字稿'); return; }
-    const d = new Date(t0||Date.now()), date = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-    const L = [`# 即時翻譯逐字稿 ${date}`, '', `- 收音開始：${t0?clock(t0):'-'}`, `- 語言：${$('src').options[$('src').selectedIndex].text.replace('講者：','')} → ${$('tgt').options[$('tgt').selectedIndex].text}`, `- 句數：${segs.length}`, '', '---', ''];
-    for (const s of segs){ L.push(`**[${clock(s.t)}｜${rel(s.t)}]**  `, `- Claude：${s.cl || '-'}${s.cms?`（${(s.cms/1000).toFixed(1)}s）`:''}`, `- Google：${s.tr || '-'}${s.ms?`（${(s.ms/1000).toFixed(1)}s）`:''}`, '', `> ${s.src}`, ''); }
-    const blob = new Blob([L.join('\n')], {type:'text/markdown'});
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${date}_${pad(d.getHours())}${pad(d.getMinutes())}_即時翻譯逐字稿.md`;
-    document.body.appendChild(a); a.click(); a.remove(); toast('已下載 .md');
+    download(new Blob([buildMd()], {type:'text/markdown'}), baseName() + '.md'); toast('已下載 .md');
   };
+  let saved = true;
+  $('endBtn').onclick = async () => {
+    if (!segs.length && !mr){ toast('這堂課還沒有開始收音'); return; }
+    if (!confirm('確定結束本課堂？會停止收音，並自動下載錄音檔與文字稿。')) return;
+    stopRec();
+    const audio = await stopAudio();
+    const base = baseName();
+    if (segs.length) download(new Blob([buildMd()], {type:'text/markdown'}), base + '.md');
+    if (audio && audio.size) setTimeout(() => download(audio, `${base}.${audioExt}`), 600);
+    saved = true;
+    toast(`已存檔：${base}.md${audio && audio.size ? ` 與 ${base}.${audioExt}` : ''}（在「下載」資料夾）`);
+    setSt('本課堂已結束並存檔');
+  };
+  const markDirty = () => { saved = false; };
+  new MutationObserver(markDirty).observe($('outG'), {childList:true});
+  window.addEventListener('beforeunload', e => { if (!saved || (mr && mr.state === 'recording')){ e.preventDefault(); e.returnValue = ''; } });
 })();
 </script>
 </body>
