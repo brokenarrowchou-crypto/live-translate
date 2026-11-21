@@ -395,8 +395,12 @@ zrender/lib/zrender.js:
     g.querySelector('.meta').textContent = `${clock(s.t)}｜${rel(s.t)}${s.ms?`　${s.eng} ${(s.ms/1000).toFixed(1)}s`:''}`;
     if (sc) outC.scrollTop = outC.scrollHeight; if (sg) outG.scrollTop = outG.scrollHeight;
   }
+  let carry = '', carryTimer = null;
   async function addFinal(text){
     text = text.trim(); if (!text) return;
+    text = (carry ? carry + ' ' : '') + text; carry = ''; clearTimeout(carryTimer);
+    const short = isCJK() ? text.replace(/\s/g,'').length < 6 : text.split(/\s+/).length < 4;
+    if (short && !/[.?!。？！]$/.test(text)){ carry = text; carryTimer = setTimeout(() => { const c = carry; carry = ''; if (c) addFinal(c + '.'); }, 6000); return; }
     const s = {id:++n, src:text, tr:'', cl:'', t:Date.now(), ms:0, cms:0, eng:''}; segs.push(s); render(s);
     (async () => { const a = performance.now();
       try { s.tr = await translate(text); s.eng = engine; } catch(e){ s.tr = '（翻譯失敗，請確認網路）'; }
@@ -442,7 +446,9 @@ Rules:
 - Keep medical terminology in English: drug names, diseases, anatomy, procedures, receptors, scales, trial names, abbreviations (e.g. ketamine, OIC, PAMORA, radiofrequency ablation, NRS). If the speaker said the term in ${srcName()}, write the standard English term.
 - Everything else: natural, concise subtitle-style ${tgtName()}.
 - The text comes from automatic speech recognition and may contain errors; silently fix obvious ones from medical context.
-- Output ONLY the translation.${topic ? `\nLecture topic: ${topic}` : ''}${prior ? `\n\nPrevious segments (context only):\n${prior}` : ''}
+- Output ONLY the translation, entirely in ${tgtName()}. Never add notes, brackets explaining ASR errors, alternatives, apologies or phrases like "Let me give a cleaner version".
+- If a term is unclear, choose the most plausible medical reading silently; do not invent drug names, numbers or study names that are not supported by the audio text.
+- The segment may be a fragment of a longer sentence; translate it as a natural fragment.${topic ? `\nLecture topic: ${topic}` : ''}${prior ? `\n\nPrevious segments (context only):\n${prior}` : ''}
 
 NEW segment:
 ${text}`;
@@ -542,7 +548,10 @@ ${text}`;
   $('mic').onclick = () => { if (running) stopRec(); else { getTranslator(); startRec(); } };
   document.addEventListener('visibilitychange', () => { if (document.hidden && running) setSt('分頁在背景，可能暫停收音'); });
 
-  $('typeIn').onkeydown = e => { if (e.key==='Enter'){ addFinal(e.target.value); e.target.value=''; } };
+  $('typeIn').onkeydown = e => { if (e.key==='Enter'){ const v = e.target.value.trim(); if (v) addFinal(/[.?!。？！]$/.test(v) ? v : v + '.'); e.target.value=''; } };
+
+  // 選單選完就移開焦點，避免之後按方向鍵（翻投影片）誤改語言設定
+  document.querySelectorAll('header select').forEach(sel => sel.addEventListener('change', () => setTimeout(() => sel.blur(), 0)));
 
   // ---------- slides ----------
   const slidePane = $('slidePane'), slideHost = $('slideHost');
@@ -632,7 +641,8 @@ ${text}`;
   const toggleClean = () => document.body.classList.toggle('clean');
   $('cleanBtn').onclick = toggleClean; $('cleanExit').onclick = toggleClean;
   document.addEventListener('keydown', e => {
-    if (e.target.matches('input,textarea,select')) return;
+    if (e.target.matches('select') && deck && ['ArrowRight','ArrowLeft','PageDown','PageUp','ArrowUp','ArrowDown'].includes(e.key)){ e.preventDefault(); e.target.blur(); }
+    else if (e.target.matches('input,textarea,select')) return;
     if (['ArrowRight','PageDown',' '].includes(e.key) && deck){ e.preventDefault(); go(1); }
     else if (['ArrowLeft','PageUp'].includes(e.key) && deck){ e.preventDefault(); go(-1); }
     else if (e.key === 'h' || e.key === 'H') toggleClean();
