@@ -103,6 +103,7 @@
     <option value="ja">日本語</option>
   </select>
   <button id="mic" class="primary">🎙 開始收音</button>
+  <button id="vidBtn" title="在左邊播放 YouTube 或本機影片，播放時自動錄音與翻譯">🎬 影片</button>
   <button id="meetBtn" title="擷取線上會議（Meet／Webex app）或 YouTube 等影片的聲音來翻譯">🖥 會議／影片</button>
   <div id="status"><span class="dot" id="dot"></span><span id="st">就緒</span></div>
   <span id="recInd" style="display:none;font-size:13px;color:var(--warn)">● 錄音 <span id="recTime">00:00</span></span>
@@ -141,11 +142,21 @@
         2. 「📊 載入簡報」選 .pdf 或 .pptx（也可直接拖進來）：左邊投影片，右邊翻譯。← → 或簡報筆翻頁，按 H 隱藏工具列。<br>
         3. 「🔑 Claude」貼上 Anthropic API key，就會有 Claude 與 Google 兩個翻譯框；沒填只顯示 Google。<br>
         4. 分頁要保持在前景；收音中斷會自動重新開始。<br>
-        5. 「🖥 會議／影片」：看 YouTube 時選該影片分頁並勾選「同時分享分頁音訊」；用 Meet／Webex app 開會時選「整個螢幕」並勾選「分享系統音訊」。網站擷取聲音、用瀏覽器內的 Whisper 辨識後翻譯，並同步錄音。第一次會下載 Whisper（可按「🔑 Claude」打開設定列，在「線上會議辨識」預先下載）。<br>
-        6. 開始收音時同步錄音；按「🏁 本課堂結束」會自動下載錄音檔與文字稿，檔名為「西元日期_課堂名稱」，沒填課堂名稱則為「日期_時間」。<br>
-        7. 「📅 議程」上傳議程 PDF、貼網址或貼文字，網站會依裝置時間自動切到正在進行的場次（同時多場會請你選），🔄 Reload 可依網址抓最新議程。
+        5. 「🎬 影片」：貼 YouTube 網址或選本機影片，影片會出現在左邊頁框；按播放就開始錄音與翻譯，暫停就一起暫停（YouTube 第一次要按一次「允許擷取這個分頁的聲音」）。<br>
+        6. 「🖥 會議／影片」：看 YouTube 時選該影片分頁並勾選「同時分享分頁音訊」；用 Meet／Webex app 開會時選「整個螢幕」並勾選「分享系統音訊」。網站擷取聲音、用瀏覽器內的 Whisper 辨識後翻譯，並同步錄音。第一次會下載 Whisper（可按「🔑 Claude」打開設定列，在「線上會議辨識」預先下載）。<br>
+        7. 開始收音時同步錄音；按「🏁 本課堂結束」會自動下載錄音檔與文字稿，檔名為「西元日期_課堂名稱」，沒填課堂名稱則為「日期_時間」。<br>
+        8. 「📅 議程」上傳議程 PDF、貼網址或貼文字，網站會依裝置時間自動切到正在進行的場次（同時多場會請你選），🔄 Reload 可依網址抓最新議程。
       </div></main></section>
     <section class="frame" id="fG"><div class="fh g">Google 翻譯</div><main id="outG"></main></section>
+  </div>
+</div>
+<div id="vidPanel" style="display:none;position:fixed;inset:0;z-index:21;background:#000a;align-items:center;justify-content:center">
+  <div style="width:min(720px,94vw);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;display:grid;gap:12px;font-size:14px">
+    <b>🎬 載入影片到左邊頁框</b>
+    <div style="display:flex;gap:8px"><input id="ytUrl" placeholder="貼上 YouTube 網址，例：https://www.youtube.com/watch?v=…" style="flex:1;font:inherit;color:var(--text);background:#14121c;border:1px solid var(--line);border-radius:8px;padding:8px"><button id="ytLoad">載入 YouTube</button></div>
+    <div>或選擇本機影片檔：<input type="file" id="vidFile" accept="video/*,audio/*"></div>
+    <div style="color:var(--muted);font-size:13px;line-height:1.6">本機影片：按播放就自動開始錄音與翻譯，不用任何授權。<br>YouTube：第一次播放前要按一次「允許擷取這個分頁的聲音」，在 Chrome 的視窗選「這個分頁」並保持「分享分頁音訊」勾選。<br>暫停影片時，錄音與翻譯也會暫停。</div>
+    <div style="text-align:right"><button id="vidClose">取消</button></div>
   </div>
 </div>
 <div id="agPanel"><div id="agBox">
@@ -334,7 +345,9 @@ zrender/lib/zrender.js:
   const toast = m => { const t=$('toast'); t.textContent=m; t.style.display='block'; clearTimeout(toast.t); toast.t=setTimeout(()=>t.style.display='none',2500); };
   const pad = n => String(n).padStart(2,'0');
   const clock = t => { const d=new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
-  let t0 = 0; const rel = t => { if(!t0) return '--:--'; const s=Math.round((t-t0)/1000); return `${pad(Math.floor(s/3600))}:${pad(Math.floor(s/60)%60)}:${pad(s%60)}`; };
+  let t0 = 0, pausedMs = 0, pauseAt = 0;   // 影片暫停的時間不算進錄音檔位置
+  const pausedNow = () => pausedMs + (pauseAt ? Date.now() - pauseAt : 0);
+  const rel = (t, pz) => { if(!t0) return '--:--'; const s=Math.round((t-t0-(pz == null ? pausedNow() : pz))/1000); return `${pad(Math.floor(s/3600))}:${pad(Math.floor(s/60)%60)}:${pad(s%60)}`; };
   let fs = 28; const applyFs = () => document.documentElement.style.setProperty('--fs', fs+'px');
   $('up').onclick = () => { fs=Math.min(64,fs+3); applyFs(); };
   $('down').onclick = () => { fs=Math.max(14,fs-3); applyFs(); };
@@ -395,8 +408,8 @@ zrender/lib/zrender.js:
     zc.textContent = s.cl || (claudeKey() ? 'Claude 翻譯中…' : '（未設定 Claude API key）'); zc.classList.toggle('pending', !s.cl);
     zg.textContent = s.tr || 'Google 翻譯中…'; zg.classList.toggle('pending', !s.tr);
     c.querySelector('.src').textContent = s.src; g.querySelector('.src').textContent = s.src;
-    c.querySelector('.meta').textContent = `${clock(s.t)}｜${rel(s.t)}${s.cms?`　${(s.cms/1000).toFixed(1)}s`:''}`;
-    g.querySelector('.meta').textContent = `${clock(s.t)}｜${rel(s.t)}${s.ms?`　${s.eng} ${(s.ms/1000).toFixed(1)}s`:''}`;
+    c.querySelector('.meta').textContent = `${clock(s.t)}｜${rel(s.t, s.pz)}${s.cms?`　${(s.cms/1000).toFixed(1)}s`:''}`;
+    g.querySelector('.meta').textContent = `${clock(s.t)}｜${rel(s.t, s.pz)}${s.ms?`　${s.eng} ${(s.ms/1000).toFixed(1)}s`:''}`;
     if (sc) outC.scrollTop = outC.scrollHeight; if (sg) outG.scrollTop = outG.scrollHeight;
   }
   let carry = '', carryTimer = null;
@@ -405,7 +418,7 @@ zrender/lib/zrender.js:
     text = (carry ? carry + ' ' : '') + text; carry = ''; clearTimeout(carryTimer);
     const short = isCJK() ? text.replace(/\s/g,'').length < 6 : text.split(/\s+/).length < 4;
     if (short && !/[.?!。？！]$/.test(text)){ carry = text; carryTimer = setTimeout(() => { const c = carry; carry = ''; if (c) addFinal(c + '.'); }, 6000); return; }
-    const s = {id:++n, src:text, tr:'', cl:'', t:Date.now(), ms:0, cms:0, eng:''}; segs.push(s); render(s);
+    const s = {id:++n, src:text, tr:'', cl:'', t:Date.now(), ms:0, cms:0, eng:'', pz:pausedNow()}; segs.push(s); render(s);
     (async () => { const a = performance.now();
       try { s.tr = await translate(text); s.eng = engine; } catch(e){ s.tr = '（翻譯失敗，請確認網路）'; }
       s.ms = performance.now() - a; render(s); })();
@@ -535,9 +548,9 @@ ${text}`;
       mr = new MediaRecorder(media, type ? {mimeType:type, audioBitsPerSecond:48000} : undefined);
       chunks = []; mr.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
       mr.start(10000);                       // 每 10 秒寫一段，避免長時間錄音資料遺失
-      recStart = Date.now(); if (!t0) t0 = recStart; else t0 = Math.min(t0, recStart);
+      recStart = Date.now(); pausedMs = 0; pauseAt = capPaused ? recStart : 0; t0 = recStart;
       $('recInd').style.display = '';
-      recTimer = setInterval(() => { const sec = Math.round((Date.now()-recStart)/1000); $('recTime').textContent = `${pad(Math.floor(sec/3600))}:${pad(Math.floor(sec/60)%60)}:${pad(sec%60)}`; }, 1000);
+      recTimer = setInterval(() => { const sec = Math.round((Date.now()-recStart-pausedNow())/1000); $('recTime').textContent = `${pad(Math.floor(sec/3600))}:${pad(Math.floor(sec/60)%60)}:${pad(sec%60)}`; }, 1000);
     } catch(e){ toast('無法錄音（只會存文字稿）：' + e.message); }
   }
   function stopAudio(){
@@ -623,21 +636,26 @@ ${text}`;
     getWorker().postMessage({type:'run', id: ++wJob, model: $('wModel').value, lang: W_LANG[$('src').value] || 'english', audio}, [audio.buffer]);
   }
 
+  let capPaused = false;
   let meetOn = false, meetStream = null, meetCtx = null, meetNode = null, meetLevel = 0, meetTick = null, wMsg = '';
   function meetStatusLine(){
     if (!meetOn) return;
     const bars = Math.min(10, Math.round(meetLevel * 25)), meter = '▮'.repeat(bars) + '▯'.repeat(10 - bars);
+    if (capPaused){ $('pt').textContent = '⏸ 影片暫停中：按播放就會繼續錄音與翻譯'; return; }
     const w = wBusy ? '辨識中…' : (wQueue.length ? `排隊 ${wQueue.length} 段` : (wReady ? '等待說話' : (wMsg || '載入 Whisper 中…')));
     $('pt').textContent = `音量 ${meter}　｜　${w}` + (meetLevel < 0.003 ? '　⚠ 沒有收到聲音：確認影片在播放、分享時有勾選音訊' : '');
   }
   const MAXSEC = {short:6, mid:10, long:15, off:20};
-  async function startMeeting(){
+  async function startMeeting(opts = {}){
     if (running) stopRec();
+    if (meetOn) stopMeeting();
     // 一定要在按鈕點擊當下建立並啟動，否則 Chrome 會讓它停在「暫停」狀態而收不到任何聲音
     try { meetCtx = new AudioContext({sampleRate:16000}); meetCtx.resume(); } catch(e){ meetCtx = null; }
-    let st;
-    try {
-      st = await navigator.mediaDevices.getDisplayMedia({video:true, audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}, systemAudio:'include', selfBrowserSurface:'exclude'});
+    let st = opts.stream;
+    if (!st) try {
+      st = await navigator.mediaDevices.getDisplayMedia(opts.thisTab
+        ? {video:true, audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}, preferCurrentTab:true, selfBrowserSurface:'include'}
+        : {video:true, audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}, systemAudio:'include', selfBrowserSurface:'exclude'});
     } catch(e){ toast('已取消分享'); try{ meetCtx && meetCtx.close(); }catch(_){} meetCtx = null; return; }
     if (!st.getAudioTracks().length){
       st.getTracks().forEach(t => t.stop()); try{ meetCtx && meetCtx.close(); }catch(_){} meetCtx = null;
@@ -665,6 +683,7 @@ ${text}`;
       let sum = 0; for (let i = 0; i < f.length; i++) sum += f[i] * f[i];
       const rms = Math.sqrt(sum / f.length), speaking = rms > Math.max(0.01, noise * 3);
       meetLevel = Math.max(rms, meetLevel * 0.9);
+      if (capPaused){ if (len) flush(); return; }                 // 影片暫停時不收、不翻
       if (!speaking) noise = noise * 0.95 + rms * 0.05;
       if (!len && !speaking) return;                             // 段落開頭的靜音不收
       buf.push(f); len += f.length;
@@ -682,7 +701,7 @@ ${text}`;
     if (!meetOn) return;
     meetOn = false; clearInterval(meetTick);
     try { meetNode && meetNode.disconnect(); meetCtx && meetCtx.close(); } catch(e){}
-    meetStream && meetStream.getTracks().forEach(t => t.stop());
+    if (!meetStream || !meetStream.__fromVideo) meetStream && meetStream.getTracks().forEach(t => t.stop());
     meetStream = null; meetNode = null; meetCtx = null;
     updMeet(); setSt('會議／影片收音已停止');
   }
@@ -752,6 +771,7 @@ ${text}`;
   }
   let busy = null, again = false;
   async function renderDeck(){
+    if (vid && !deck){ layoutSplit(16/9); const b = slideHost.firstElementChild; if (b){ const {w,h} = fit(16/9); b.style.width = w+'px'; b.style.height = h+'px'; } return; }
     if (!deck) return; if (busy){ again = true; return; }
     busy = (async () => { do { again = false; try { deck.kind === 'pdf' ? await renderPdf() : await renderPptx(); } catch(e){ console.error(e); toast('投影片顯示失敗，建議改存 PDF'); } } while (again && deck); })();
     await busy; busy = null;
@@ -789,6 +809,76 @@ ${text}`;
     else if (e.key === 'h' || e.key === 'H') toggleClean();
   });
   let rsT; new ResizeObserver(() => { clearTimeout(rsT); rsT = setTimeout(renderDeck, 250); }).observe($('stage'));
+
+  // ---------- 左邊頁框播放影片（YouTube／本機檔）----------
+  let vid = null;
+  $('vidBtn').onclick = () => { $('vidPanel').style.display = 'flex'; $('ytUrl').focus(); };
+  $('vidClose').onclick = () => $('vidPanel').style.display = 'none';
+  function ytId(u){ const m = String(u).match(/(?:youtu\.be\/|v=|\/shorts\/|\/embed\/|\/live\/)([\w-]{11})/); return m ? m[1] : (/^[\w-]{11}$/.test(u) ? u : null); }
+  function showInPane(node){
+    if (deck) closeDeck();
+    closeVideo(true);
+    document.body.classList.add('split'); layoutSplit(16/9);
+    slideHost.innerHTML = ''; const box = document.createElement('div');
+    const {w, h} = fit(16/9); box.style.cssText = `width:${w}px;height:${h}px;position:relative;background:#000`;
+    box.appendChild(node); slideHost.appendChild(box); $('slNum').textContent = '影片';
+    return box;
+  }
+  function closeVideo(keepSplit){
+    if (!vid) return;
+    if (meetOn && (vid.kind === 'yt' || (meetStream && meetStream.__fromVideo))) stopMeeting();
+    try { vid.player && vid.player.destroy && vid.player.destroy(); } catch(e){}
+    if (vid.url) URL.revokeObjectURL(vid.url);
+    vid = null; capPaused = false;
+    if (!keepSplit){ slideHost.innerHTML = ''; document.body.classList.remove('split'); document.body.style.removeProperty('--slideW'); $('slNum').textContent = '–'; }
+  }
+  const setPlaying = playing => {
+    if (!playing && !capPaused) pauseAt = Date.now();
+    if (playing && pauseAt){ pausedMs += Date.now() - pauseAt; pauseAt = 0; }
+    capPaused = !playing;
+    try { if (mr){ if (playing && mr.state === 'paused') mr.resume(); if (!playing && mr.state === 'recording') mr.pause(); } } catch(e){}
+  };
+  // 本機影片：直接從 <video> 擷取聲音，播放即開始，不需授權
+  $('vidFile').onchange = () => {
+    const f = $('vidFile').files[0]; $('vidFile').value = ''; if (!f) return;
+    $('vidPanel').style.display = 'none';
+    const url = URL.createObjectURL(f), v = document.createElement('video');
+    v.src = url; v.controls = true; v.playsInline = true; v.style.cssText = 'width:100%;height:100%;background:#000';
+    showInPane(v); vid = {kind:'file', el:v, url};
+    if (!$('course').value.trim()) { $('course').value = f.name.replace(/\.[^.]+$/, '').slice(0, 60); LS('lt_course', $('course').value); }
+    const begin = () => { if (meetOn) return; const st = v.captureStream(); if (!st.getAudioTracks().length) return false; st.__fromVideo = true; startMeeting({stream: st}); return true; };
+    v.addEventListener('play', () => { if (begin() === false) v.addEventListener('playing', begin, {once:true}); setPlaying(true); });
+    v.addEventListener('pause', () => setPlaying(false));
+    v.addEventListener('ended', () => setPlaying(false));
+    toast('按影片的播放鍵，就會開始錄音與翻譯');
+  };
+  // YouTube：官方嵌入播放器；聲音以「分享這個分頁」擷取（Chrome 規定要使用者同意一次）
+  let ytApi = null;
+  const loadYtApi = () => ytApi || (ytApi = new Promise(res => { if (window.YT && YT.Player) return res(); window.onYouTubeIframeAPIReady = res; const sc = document.createElement('script'); sc.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(sc); }));
+  $('ytLoad').onclick = async () => {
+    const id = ytId($('ytUrl').value.trim()); if (!id){ toast('看不懂這個 YouTube 網址'); return; }
+    $('vidPanel').style.display = 'none';
+    await loadYtApi();
+    const holder = document.createElement('div'); holder.style.cssText = 'width:100%;height:100%';
+    const box = showInPane(holder);
+    const gate = document.createElement('button');
+    gate.textContent = '🔊 允許擷取這個分頁的聲音（播放前按一次）';
+    gate.style.cssText = 'position:absolute;left:50%;top:12px;transform:translateX(-50%);z-index:3;background:var(--accent);color:#1a1606;font-weight:700;border:none;padding:8px 14px;border-radius:10px';
+    box.appendChild(gate);
+    const player = new YT.Player(holder, {videoId: id, width: '100%', height: '100%', playerVars: {rel: 0, playsinline: 1},
+      events: {
+        onStateChange: e => { if (meetOn) setPlaying(e.data === 1); },
+        onReady: () => { try { const t = player.getVideoData().title; if (t && !$('course').value.trim()){ $('course').value = t.slice(0, 60); LS('lt_course', $('course').value); } } catch(_){} },
+        onError: e => { if (e.data === 101 || e.data === 150) toast('這支影片不允許嵌入播放：請改在 YouTube 分頁播放，用「🖥 會議／影片」擷取'); }
+      }});
+    vid = {kind:'yt', player};
+    gate.onclick = async () => {
+      await startMeeting({thisTab:true});
+      if (meetOn){ gate.remove(); setPlaying(player.getPlayerState && player.getPlayerState() === 1); toast('準備好了，按影片播放就會開始錄音與翻譯'); }
+      else toast('沒有擷取到聲音：請選「這個分頁」並保持「分享分頁音訊」勾選');
+    };
+  };
+  $('slClose').addEventListener('click', () => closeVideo(false));
 
   // ---------- agenda ----------
   const agMsg = t => $('agMsg').textContent = t || '';
@@ -983,7 +1073,7 @@ Use 24-hour times in the conference's local time. If the year is missing assume 
     const L = [`# ${title}`, '', `- 日期：${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`, `- 收音開始：${t0?clock(t0):'-'}`, `- 演講主題：${$('topic').value.trim() || '-'}`,
       `- 語言：${$('src').options[$('src').selectedIndex].text.replace('講者：','')} → ${$('tgt').options[$('tgt').selectedIndex].text}`, `- 句數：${segs.length}`,
       `- 時間戳格式：[實際時間｜錄音檔中的位置]`, '', '---', ''];
-    for (const s of segs){ L.push(`**[${clock(s.t)}｜${rel(s.t)}]**  `, `- Claude：${s.cl || '-'}${s.cms?`（${(s.cms/1000).toFixed(1)}s）`:''}`, `- Google：${s.tr || '-'}${s.ms?`（${(s.ms/1000).toFixed(1)}s）`:''}`, '', `> ${s.src}`, ''); }
+    for (const s of segs){ L.push(`**[${clock(s.t)}｜${rel(s.t, s.pz)}]**  `, `- Claude：${s.cl || '-'}${s.cms?`（${(s.cms/1000).toFixed(1)}s）`:''}`, `- Google：${s.tr || '-'}${s.ms?`（${(s.ms/1000).toFixed(1)}s）`:''}`, '', `> ${s.src}`, ''); }
     return L.join('\n');
   }
   function download(blob, filename){
