@@ -16,6 +16,27 @@
   button.primary.on{background:var(--warn);border-color:var(--warn);color:#fff}
   #status{font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center}
   .dot{width:9px;height:9px;border-radius:50%;background:#555}.dot.live{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  /* ---- 工具列分組 ---- */
+  .grp{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:0 8px;border-left:1px solid var(--line)}
+  .grp.g-title{border-left:none;padding-left:0;flex:1 1 auto;min-width:0}
+  .grp .course{width:160px;font:inherit;font-size:14px;color:var(--text);background:#14121c;border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+  #agNow{font-size:13px}
+  @media (max-width: 820px){
+    header{display:grid;grid-template-columns:1fr;gap:6px;padding:8px}
+    .grp{border-left:none;padding:0;gap:5px;position:relative}
+    .grp:not(.g-title){padding-left:40px}
+    .grp:not(.g-title)::before{content:attr(data-label);position:absolute;left:0;top:7px;font-size:12px;color:var(--muted)}
+    .grp.g-title{justify-content:space-between}
+    button,select{font-size:13px;padding:5px 8px}
+    .grp select{flex:1 1 0;min-width:0}
+    .grp .course{flex:1 1 120px;width:auto;font-size:13px}
+    h1{font-size:15px}
+    /* 手機：投影片／影片在上，翻譯在下 */
+    body.split #stage{flex-direction:column}
+    body.split #slidePane{flex:0 0 auto!important;width:100%;height:36vh}
+    body.split #frames{border-left:none;border-top:2px solid #8a5cf6;min-width:0}
+    #keyBox{gap:6px}
+  }
   .spacer{flex:1}
   #stage{flex:1;display:flex;min-height:0}
   #frames{flex:1;display:flex;min-width:0;min-height:0}
@@ -82,44 +103,28 @@
 </head>
 <body>
 <header>
-  <h1>即時翻譯 <span id="dir">KO → 繁中</span></h1>
-  <select id="src">
+  <div class="grp g-title" data-label=""><h1>即時翻譯 <span id="dir">KO → 繁中</span></h1><div id="status"><span class="dot" id="dot"></span><span id="st">就緒</span></div><span id="recInd" style="display:none;font-size:13px;color:var(--warn)">● 錄音 <span id="recTime">00:00</span></span><span id="agNow" style="font-size:13px;color:#ffd98a;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="點這裡選擇場次"></span></div>
+  <div class="grp g-rec" data-label="收音"><button id="mic" class="primary">🎙 開始收音</button><button id="vidBtn" title="在左邊播放 YouTube 或本機影片，播放時自動錄音與翻譯">🎬 影片</button><button id="meetBtn" title="擷取線上會議（Meet／Webex app）或 YouTube 等影片的聲音來翻譯">🖥 會議／影片</button></div>
+  <div class="grp g-lang" data-label="語言"><select id="src">
     <option value="ko-KR">講者：한국어</option>
     <option value="en-US">講者：English</option>
     <option value="ja-JP">講者：日本語</option>
     <option value="zh-TW">講者：中文</option>
-  </select>
-  <select id="cutSel" title="辨識中的句子超過這個長度，就先切一段送去翻譯">
-    <option value="short">斷句：短（最即時）</option>
-    <option value="mid" selected>斷句：中</option>
-    <option value="long">斷句：長（較完整）</option>
-    <option value="off">斷句：關閉</option>
-  </select>
-  <select id="tgt">
+  </select><select id="tgt">
     <option value="zh-TW">繁體中文（台灣）</option>
     <option value="zh-CN">简体中文</option>
     <option value="en">English</option>
     <option value="ko">한국어</option>
     <option value="ja">日本語</option>
-  </select>
-  <button id="mic" class="primary">🎙 開始收音</button>
-  <button id="vidBtn" title="在左邊播放 YouTube 或本機影片，播放時自動錄音與翻譯">🎬 影片</button>
-  <button id="meetBtn" title="擷取線上會議（Meet／Webex app）或 YouTube 等影片的聲音來翻譯">🖥 會議／影片</button>
-  <div id="status"><span class="dot" id="dot"></span><span id="st">就緒</span></div>
-  <span id="recInd" style="display:none;font-size:13px;color:var(--warn)">● 錄音 <span id="recTime">00:00</span></span>
-  <div class="spacer"></div>
-  <button id="down">A−</button><button id="up">A+</button>
-  <button id="togSrc">原文 ✓</button>
-  <button id="slideBtn">📊 載入簡報</button><input id="slideFile" type="file" accept=".pptx,.pdf" hidden>
-  <button id="cleanBtn">隱藏工具列</button>
-  <button id="agBtn" title="上傳議程 PDF 或貼上網址，依時間自動對應場次">📅 議程</button>
-  <span id="agNow" style="font-size:13px;color:#ffd98a;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="點這裡選擇場次"></span>
-  <button id="keyBtn">🔑 Claude</button>
-  <input id="course" placeholder="課堂名稱（選填）" title="存檔檔名會用：西元日期＋課堂名稱" style="width:170px;font:inherit;font-size:14px;color:var(--text);background:#14121c;border:1px solid var(--line);border-radius:8px;padding:6px 8px">
-  <button id="md">💾 存 .md</button>
-  <button id="endBtn" style="background:#3b1d24;border-color:var(--warn);color:#ffb4a8;font-weight:700">🏁 本課堂結束</button>
-  <button id="clear">清除</button>
-  <input id="typeIn" placeholder="測試：貼上一句原文按 Enter" style="flex:1 1 220px;min-width:180px;font:inherit;font-size:14px;color:var(--text);background:#14121c;border:1px solid var(--line);border-radius:8px;padding:6px 10px">
+  </select><select id="cutSel" title="辨識中的句子超過這個長度，就先切一段送去翻譯">
+    <option value="short">斷句：短（最即時）</option>
+    <option value="mid" selected>斷句：中</option>
+    <option value="long">斷句：長（較完整）</option>
+    <option value="off">斷句：關閉</option>
+  </select></div>
+  <div class="grp g-content" data-label="內容"><button id="slideBtn">📊 載入簡報</button><input id="slideFile" type="file" accept=".pptx,.pdf" hidden><button id="agBtn" title="上傳議程 PDF 或貼上網址，依時間自動對應場次">📅 議程</button><button id="cleanBtn">隱藏工具列</button></div>
+  <div class="grp g-class" data-label="課堂"><input id="course" placeholder="課堂名稱（選填）" title="存檔檔名會用：西元日期＋課堂名稱" class="course"><button id="md">💾 存 .md</button><button id="endBtn" style="background:#3b1d24;border-color:var(--warn);color:#ffb4a8;font-weight:700">🏁 本課堂結束</button><button id="clear">清除</button></div>
+  <div class="grp g-view" data-label="顯示"><button id="down">A−</button><button id="up">A+</button><button id="togSrc">原文 ✓</button><button id="keyBtn">🔑 Claude</button></div>
 </header>
 <div id="keyBox">
   <span>Anthropic API key：</span><input id="key" type="password" placeholder="sk-ant-…（只存在這台電腦的瀏覽器裡）">
@@ -128,6 +133,8 @@
   <button id="keySave">儲存</button>
   <span style="margin-left:12px">線上會議辨識：</span><select id="wModel"><option value="onnx-community/whisper-base">Whisper base（約 150 MB，快）</option><option value="onnx-community/whisper-small">Whisper small（約 450 MB，較準）</option></select>
   <button id="wDl">⬇ 預先下載</button><span id="wStat" style="color:#ffd98a"></span>
+
+  <span style="margin-left:12px">測試：</span><input id="typeIn" placeholder="測試：貼上一句原文按 Enter" style="flex:1 1 240px;min-width:200px;font:inherit;font-size:13px;color:var(--text);background:#14121c;border:1px solid var(--line);border-radius:8px;padding:7px">
 </div>
 <div id="stage">
   <div id="slidePane"><div id="slideHost"></div>
