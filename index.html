@@ -660,6 +660,11 @@ ${text}`;
     // 一定要在按鈕點擊當下建立並啟動，否則 Chrome 會讓它停在「暫停」狀態而收不到任何聲音
     try { meetCtx = new AudioContext({sampleRate:16000}); meetCtx.resume(); } catch(e){ meetCtx = null; }
     let st = opts.stream;
+    if (!st && !(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)){
+      try{ meetCtx && meetCtx.close(); }catch(_){} meetCtx = null;
+      const msg = '這台裝置（手機／平板）的瀏覽器不支援擷取分頁或系統聲音。請改用電腦版 Chrome；手機上可用「🎬 影片 → 本機檔案」，或「🎙 開始收音」讓麥克風聽外放的聲音。';
+      setSt('⚠ ' + msg); toast(msg); return;
+    }
     if (!st) try {
       st = await navigator.mediaDevices.getDisplayMedia(opts.thisTab
         ? {video:true, audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}, preferCurrentTab:true, selfBrowserSurface:'include'}
