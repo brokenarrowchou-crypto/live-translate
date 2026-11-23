@@ -579,13 +579,14 @@ ${text}`;
   function getWorker(){
     if (wWorker) return wWorker;
     wWorker = new Worker(URL.createObjectURL(new Blob([WORKER_SRC], {type:'text/javascript'})), {type:'module'});
+    wWorker.onerror = e => { wMsg = '⚠ Whisper 無法啟動：' + (e.message || '載入程式失敗，請確認網路'); $('wStat').textContent = wMsg; toast(wMsg); setSt(wMsg); wWorker = null; };
     wWorker.onmessage = e => {
       const m = e.data;
       if (m.type === 'progress'){
         const p = m.p || {};
         if (p.status === 'progress' && p.file){ wFiles[p.file] = [p.loaded || 0, p.total || 0];
           const L = Object.values(wFiles).reduce((a,b) => a + b[0], 0), T = Object.values(wFiles).reduce((a,b) => a + b[1], 0);
-          $('wStat').textContent = `下載 Whisper 中… ${Math.round(L/1048576)} / ${Math.round(T/1048576)} MB`; }
+          $('wStat').textContent = wMsg = `下載 Whisper 中… ${Math.round(L/1048576)} / ${Math.round(T/1048576)} MB`; }
       } else if (m.type === 'ready'){
         wReady = true; $('wStat').textContent = `✓ Whisper 已就緒（${m.device === 'webgpu' ? '顯示卡加速' : 'CPU 模式，較慢'}）`;
         LS('lt_wready', $('wModel').value);
@@ -594,7 +595,7 @@ ${text}`;
         $('pt').textContent = wQueue.length ? `辨識中…（排隊 ${wQueue.length} 段）` : (meetOn ? '聆聽會議中…' : '—');
         pumpWhisper();
       } else if (m.type === 'error'){
-        wBusy = false; $('wStat').textContent = '⚠ Whisper 錯誤：' + m.msg; pumpWhisper();
+        wBusy = false; $('wStat').textContent = wMsg = '⚠ Whisper 錯誤：' + m.msg; toast(wMsg); setSt(wMsg); pumpWhisper();
       }
     };
     return wWorker;
@@ -622,16 +623,24 @@ ${text}`;
     getWorker().postMessage({type:'run', id: ++wJob, model: $('wModel').value, lang: W_LANG[$('src').value] || 'english', audio}, [audio.buffer]);
   }
 
-  let meetOn = false, meetStream = null, meetCtx = null, meetNode = null;
+  let meetOn = false, meetStream = null, meetCtx = null, meetNode = null, meetLevel = 0, meetTick = null, wMsg = '';
+  function meetStatusLine(){
+    if (!meetOn) return;
+    const bars = Math.min(10, Math.round(meetLevel * 25)), meter = '▮'.repeat(bars) + '▯'.repeat(10 - bars);
+    const w = wBusy ? '辨識中…' : (wQueue.length ? `排隊 ${wQueue.length} 段` : (wReady ? '等待說話' : (wMsg || '載入 Whisper 中…')));
+    $('pt').textContent = `音量 ${meter}　｜　${w}` + (meetLevel < 0.003 ? '　⚠ 沒有收到聲音：確認影片在播放、分享時有勾選音訊' : '');
+  }
   const MAXSEC = {short:6, mid:10, long:15, off:20};
   async function startMeeting(){
     if (running) stopRec();
+    // 一定要在按鈕點擊當下建立並啟動，否則 Chrome 會讓它停在「暫停」狀態而收不到任何聲音
+    try { meetCtx = new AudioContext({sampleRate:16000}); meetCtx.resume(); } catch(e){ meetCtx = null; }
     let st;
     try {
       st = await navigator.mediaDevices.getDisplayMedia({video:true, audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}, systemAudio:'include', selfBrowserSurface:'exclude'});
-    } catch(e){ toast('已取消分享'); return; }
+    } catch(e){ toast('已取消分享'); try{ meetCtx && meetCtx.close(); }catch(_){} meetCtx = null; return; }
     if (!st.getAudioTracks().length){
-      st.getTracks().forEach(t => t.stop());
+      st.getTracks().forEach(t => t.stop()); try{ meetCtx && meetCtx.close(); }catch(_){} meetCtx = null;
       setSt('⚠ 沒有擷取到聲音：YouTube 請選該分頁並勾選「同時分享分頁音訊」；會議 app 請選整個螢幕並勾選「分享系統音訊」'); toast('請重新按「會議／影片」，記得勾選分享音訊'); return;
     }
     meetStream = st; meetOn = true; updMeet();
@@ -642,7 +651,8 @@ ${text}`;
     startAudio(new MediaStream(st.getAudioTracks().map(t => t.clone())));      // 錄音用複本，存檔時不會中斷會議擷取
     if (!t0) t0 = Date.now();
     // 16 kHz 取樣；用音量判斷說話與停頓，切成段落送 Whisper
-    meetCtx = new AudioContext({sampleRate:16000});
+    if (!meetCtx) meetCtx = new AudioContext({sampleRate:16000});
+    if (meetCtx.state !== 'running') await meetCtx.resume().catch(() => {});
     const srcNode = meetCtx.createMediaStreamSource(new MediaStream(st.getAudioTracks()));
     meetNode = meetCtx.createScriptProcessor(4096, 1, 1);
     let buf = [], len = 0, speechLen = 0, silentRun = 0, noise = 0.005;
@@ -654,6 +664,7 @@ ${text}`;
       const d = e.inputBuffer.getChannelData(0), f = new Float32Array(d);
       let sum = 0; for (let i = 0; i < f.length; i++) sum += f[i] * f[i];
       const rms = Math.sqrt(sum / f.length), speaking = rms > Math.max(0.01, noise * 3);
+      meetLevel = Math.max(rms, meetLevel * 0.9);
       if (!speaking) noise = noise * 0.95 + rms * 0.05;
       if (!len && !speaking) return;                             // 段落開頭的靜音不收
       buf.push(f); len += f.length;
@@ -663,12 +674,13 @@ ${text}`;
       if (silentRun > 16000 * 2 && speechLen < 16000 * 0.5) { buf = []; len = 0; speechLen = 0; silentRun = 0; }
     };
     srcNode.connect(meetNode); meetNode.connect(meetCtx.destination);       // ScriptProcessor 需接到輸出才會運作（輸出為靜音）
+    clearInterval(meetTick); meetTick = setInterval(meetStatusLine, 500);
     setSt(`擷取會議／影片聲音中（${$('src').options[$('src').selectedIndex].text.replace('講者：','')}，Whisper 辨識）`, true);
     $('pt').textContent = '聆聽會議中…';
   }
   function stopMeeting(){
     if (!meetOn) return;
-    meetOn = false;
+    meetOn = false; clearInterval(meetTick);
     try { meetNode && meetNode.disconnect(); meetCtx && meetCtx.close(); } catch(e){}
     meetStream && meetStream.getTracks().forEach(t => t.stop());
     meetStream = null; meetNode = null; meetCtx = null;
