@@ -153,9 +153,10 @@
 <div id="vidPanel" style="display:none;position:fixed;inset:0;z-index:21;background:#000a;align-items:center;justify-content:center">
   <div style="width:min(720px,94vw);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;display:grid;gap:12px;font-size:14px">
     <b>🎬 載入影片到左邊頁框</b>
-    <div style="display:flex;gap:8px"><input id="ytUrl" placeholder="貼上 YouTube 網址，例：https://www.youtube.com/watch?v=…" style="flex:1;font:inherit;color:var(--text);background:#14121c;border:1px solid var(--line);border-radius:8px;padding:8px"><button id="ytLoad">載入 YouTube</button></div>
-    <div>或選擇本機影片檔：<input type="file" id="vidFile" accept="video/*,audio/*"></div>
-    <div style="color:var(--muted);font-size:13px;line-height:1.6">本機影片：按播放就自動開始錄音與翻譯，不用任何授權。<br>YouTube：第一次播放前要按一次「允許擷取這個分頁的聲音」，在 Chrome 的視窗選「這個分頁」並保持「分享分頁音訊」勾選。<br>暫停影片時，錄音與翻譯也會暫停。</div>
+    <div><b>① 網路連結</b>（YouTube、Vimeo，或 .mp4／.webm 影片網址）</div>
+    <div style="display:flex;gap:8px"><input id="ytUrl" placeholder="貼上影片網址，例：https://www.youtube.com/watch?v=…" style="flex:1;font:inherit;color:var(--text);background:#14121c;border:1px solid var(--line);border-radius:8px;padding:8px"><button id="ytLoad">載入連結</button></div>
+    <div><b>② 本機檔案</b>：<input type="file" id="vidFile" accept="video/*,audio/*"></div>
+    <div style="color:var(--muted);font-size:13px;line-height:1.6">本機檔案、可直接播放的影片網址：按播放就自動開始錄音與翻譯，不用任何授權。<br>YouTube／Vimeo：第一次播放前要按一次「允許擷取這個分頁的聲音」，在 Chrome 的視窗選「這個分頁」並保持「分享分頁音訊」勾選。<br>暫停影片時，錄音與翻譯也會暫停。</div>
     <div style="text-align:right"><button id="vidClose">取消</button></div>
   </div>
 </div>
@@ -855,8 +856,51 @@ ${text}`;
   // YouTube：官方嵌入播放器；聲音以「分享這個分頁」擷取（Chrome 規定要使用者同意一次）
   let ytApi = null;
   const loadYtApi = () => ytApi || (ytApi = new Promise(res => { if (window.YT && YT.Player) return res(); window.onYouTubeIframeAPIReady = res; const sc = document.createElement('script'); sc.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(sc); }));
+  // 共用：本機或可直接播放的影片元素 → 播放即擷取
+  function mountVideoEl(v, title){
+    v.controls = true; v.playsInline = true; v.style.cssText = 'width:100%;height:100%;background:#000';
+    showInPane(v);
+    if (title && !$('course').value.trim()) { $('course').value = title.slice(0, 60); LS('lt_course', $('course').value); }
+    const begin = () => { if (meetOn) return true; let st; try { st = v.captureStream(); } catch(e){ return 'blocked'; }
+      if (!st.getAudioTracks().length) return false; st.__fromVideo = true; startMeeting({stream: st}); return true; };
+    v.addEventListener('play', () => { const r = begin(); if (r === false) v.addEventListener('playing', begin, {once:true});
+      if (r === 'blocked') toast('這個網址的影片不允許網站讀取聲音，請下載後用「本機檔案」，或在新分頁播放再用「🖥 會議／影片」'); setPlaying(true); });
+    v.addEventListener('pause', () => setPlaying(false));
+    v.addEventListener('ended', () => setPlaying(false));
+  }
+  // 共用：嵌入播放器（YouTube／Vimeo）→ 需按一次「擷取這個分頁的聲音」
+  function addTabGate(box, isPlaying){
+    const gate = document.createElement('button');
+    gate.textContent = '🔊 允許擷取這個分頁的聲音（播放前按一次）';
+    gate.style.cssText = 'position:absolute;left:50%;top:12px;transform:translateX(-50%);z-index:3;background:var(--accent);color:#1a1606;font-weight:700;border:none;padding:8px 14px;border-radius:10px';
+    box.appendChild(gate);
+    gate.onclick = async () => {
+      await startMeeting({thisTab:true});
+      if (meetOn){ gate.remove(); setPlaying(isPlaying()); toast('準備好了，按影片播放就會開始錄音與翻譯'); }
+      else toast('沒有擷取到聲音：請選「這個分頁」並保持「分享分頁音訊」勾選');
+    };
+  }
   $('ytLoad').onclick = async () => {
-    const id = ytId($('ytUrl').value.trim()); if (!id){ toast('看不懂這個 YouTube 網址'); return; }
+    const raw = $('ytUrl').value.trim(); if (!raw){ toast('請先貼上影片網址'); return; }
+    const vm = raw.match(/vimeo\.com\/(?:video\/)?(\d+)/);
+    if (!ytId(raw) && vm){            // Vimeo
+      $('vidPanel').style.display = 'none';
+      const f = document.createElement('iframe'); f.src = `https://player.vimeo.com/video/${vm[1]}`; f.allow = 'autoplay; fullscreen';
+      f.style.cssText = 'width:100%;height:100%;border:0';
+      const box = showInPane(f); vid = {kind:'yt'};
+      let playing = false; window.addEventListener('message', e => { if (!/vimeo\.com/.test(e.origin)) return;
+        try { const d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; if (d.event === 'play' || d.event === 'playing'){ playing = true; meetOn && setPlaying(true); } if (d.event === 'pause' || d.event === 'ended'){ playing = false; meetOn && setPlaying(false); } } catch(_){} });
+      f.onload = () => ['play','pause','ended'].forEach(ev => f.contentWindow.postMessage(JSON.stringify({method:'addEventListener', value:ev}), '*'));
+      addTabGate(box, () => playing); return;
+    }
+    if (!ytId(raw) && /^https?:\/\//i.test(raw)){   // 直接的影片檔網址
+      $('vidPanel').style.display = 'none';
+      const v = document.createElement('video'); v.crossOrigin = 'anonymous'; v.src = raw;
+      v.onerror = () => toast('這個網址無法直接播放：若是一般網頁，請在新分頁播放，再用「🖥 會議／影片」擷取');
+      mountVideoEl(v, decodeURIComponent(raw.split('/').pop().split('?')[0]).replace(/\.[^.]+$/, ''));
+      vid = {kind:'file', el:v}; toast('按影片的播放鍵，就會開始錄音與翻譯'); return;
+    }
+    const id = ytId(raw); if (!id){ toast('看不懂這個網址'); return; }
     $('vidPanel').style.display = 'none';
     await loadYtApi();
     const holder = document.createElement('div'); holder.style.cssText = 'width:100%;height:100%';
