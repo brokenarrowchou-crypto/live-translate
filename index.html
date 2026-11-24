@@ -114,16 +114,24 @@
   <div class="grp g-title" data-label=""><h1>即時翻譯 <span id="dir">KO → 繁中</span></h1><div id="status"><span class="dot" id="dot"></span><span id="st">就緒</span></div><span id="recInd" style="display:none;font-size:13px;color:var(--warn)">● 錄音 <span id="recTime">00:00</span></span><span id="agNow" style="font-size:13px;color:#ffd98a;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="點這裡選擇場次"></span></div>
   <div class="grp g-rec" data-label="收音"><button id="mic" class="primary">🎙 開始收音</button><button id="vidBtn" title="在左邊播放 YouTube 或本機影片，播放時自動錄音與翻譯">🎬 影片</button><button id="meetBtn" title="擷取線上會議（Meet／Webex app）或 YouTube 等影片的聲音來翻譯">🖥 會議／影片</button></div>
   <div class="grp g-lang" data-label="語言"><select id="src">
+    <option value="auto">講者：自動判斷</option>
     <option value="ko-KR">講者：한국어</option>
     <option value="en-US">講者：English</option>
     <option value="ja-JP">講者：日本語</option>
     <option value="zh-TW">講者：中文</option>
-  </select><select id="tgt">
+  </select><select id="tgt" title="聽者語言（預設跟這台裝置的語言相同，可手動更換）">
     <option value="zh-TW">繁體中文（台灣）</option>
+    <option value="zh-HK">繁體中文（香港）</option>
     <option value="zh-CN">简体中文</option>
     <option value="en">English</option>
-    <option value="ko">한국어</option>
     <option value="ja">日本語</option>
+    <option value="ko">한국어</option>
+    <option value="vi">Tiếng Việt</option>
+    <option value="th">ภาษาไทย</option>
+    <option value="id">Bahasa Indonesia</option>
+    <option value="es">Español</option>
+    <option value="fr">Français</option>
+    <option value="de">Deutsch</option>
   </select><select id="cutSel" title="辨識中的句子超過這個長度，就先切一段送去翻譯">
     <option value="short">斷句：短（最即時）</option>
     <option value="mid" selected>斷句：中</option>
@@ -154,7 +162,7 @@
       <div class="keyhint" id="keyHint">🔑 尚未設定 Anthropic API key：點這裡或按上方「🔑 Claude」貼上 key，這一框就會開始顯示 Claude 翻譯。</div>
       <div class="notice" id="intro">
         <strong>使用方式</strong><br>
-        1. 用 <strong>Chrome</strong> 開這個網頁，選好講者語言，按「🎙 開始收音」，允許麥克風。<br>
+        1. 用 <strong>Chrome</strong> 開這個網頁，按「🎙 開始收音」，允許麥克風。講者語言預設「自動判斷」（用 Whisper 辨識，可中途換語言）；指定語言時改用 Chrome 辨識，延遲較低。聽者語言預設跟這台裝置相同，可手動更換。<br>
         2. 「📊 載入簡報」選 .pdf 或 .pptx（也可直接拖進來）：左邊投影片，右邊翻譯。← → 或簡報筆翻頁，按 H 隱藏工具列。<br>
         3. 「🔑 Claude」貼上 Anthropic API key，就會有 Claude 與 Google 兩個翻譯框；沒填只顯示 Google。<br>
         4. 分頁要保持在前景；收音中斷會自動重新開始。<br>
@@ -372,18 +380,32 @@ zrender/lib/zrender.js:
 
   let translator = null, transKey = '';
   // default target = device language
-  const dl = (navigator.language||'zh-TW').toLowerCase();
-  $('tgt').value = dl.startsWith('zh') ? (/cn|hans|sg/.test(dl)?'zh-CN':'zh-TW') : (['en','ko','ja'].find(x=>dl.startsWith(x)) || 'zh-TW');
-  const short = {'ko-KR':'KO','en-US':'EN','ja-JP':'JA','zh-TW':'ZH','zh-CN':'简中','en':'EN','ko':'KO','ja':'JA'};
+  // 聽者語言：預設＝裝置語言；手動選過就記住
+  function deviceTgt(){
+    const opts = [...$('tgt').options].map(o => o.value);
+    for (const raw of (navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || 'zh-TW'])){
+      const l = String(raw).toLowerCase();
+      if (l.startsWith('zh')) return /hk|mo/.test(l) ? 'zh-HK' : (/cn|hans|sg/.test(l) ? 'zh-CN' : 'zh-TW');
+      const b = l.split('-')[0]; if (opts.includes(b)) return b;
+    }
+    return 'zh-TW';
+  }
+  let savedTgt = ''; try { savedTgt = localStorage.getItem('lt_tgt') || ''; } catch(e){}
+  $('tgt').value = [...$('tgt').options].some(o => o.value === savedTgt) ? savedTgt : deviceTgt();
+  let savedSrc = ''; try { savedSrc = localStorage.getItem('lt_src') || ''; } catch(e){}
+  $('src').value = [...$('src').options].some(o => o.value === savedSrc) ? savedSrc : 'auto';
+  const short = {'auto':'自動','ko-KR':'KO','en-US':'EN','ja-JP':'JA','zh-TW':'ZH','zh-HK':'繁中(港)','zh-CN':'简中','en':'EN','ko':'KO','ja':'JA','vi':'VI','th':'TH','id':'ID','es':'ES','fr':'FR','de':'DE'};
   const updDir = () => { $('dir').textContent = `${short[$('src').value]} → ${$('tgt').value==='zh-TW'?'繁中':short[$('tgt').value]}`; translator=null; };
-  $('src').onchange = () => { updDir(); if (running){ stopRec(); setTimeout(startRec, 300); }
+  $('src').onchange = () => { updDir(); try { localStorage.setItem('lt_src', $('src').value); } catch(e){}
+    if (running){ stopRec(); if ($('src').value === 'auto') toast('自動判斷改用 Whisper：請再按一次「開始收音」'); else setTimeout(startRec, 300); }
     if (typeof meetOn !== 'undefined' && meetOn) setSt(`擷取會議／影片聲音中（${$('src').options[$('src').selectedIndex].text.replace('講者：','')}，Whisper 辨識）`, true); };
-  $('tgt').onchange = updDir; updDir();
+  $('tgt').onchange = () => { updDir(); try { localStorage.setItem('lt_tgt', $('tgt').value); } catch(e){} toast('之後的句子會翻成：' + $('tgt').options[$('tgt').selectedIndex].text); }; updDir();
 
   // ---------- translation ----------
-  const apiCode = c => ({'zh-TW':'zh-Hant','zh-CN':'zh','en-US':'en','ko-KR':'ko','ja-JP':'ja'})[c] || c;
-  const gCode = c => ({'en-US':'en','ko-KR':'ko','ja-JP':'ja'})[c] || c;
+  const apiCode = c => ({'zh-TW':'zh-Hant','zh-HK':'zh-Hant','zh-CN':'zh','en-US':'en','ko-KR':'ko','ja-JP':'ja'})[c] || c;
+  const gCode = c => ({'en-US':'en','ko-KR':'ko','ja-JP':'ja','zh-HK':'zh-TW'})[c] || c;
   async function getTranslator(){
+    if ($('src').value === 'auto') return null;          // 來源自動判斷：改用 Google（sl=auto）
     const s = apiCode($('src').value), t = apiCode($('tgt').value), key = s+'>'+t;
     if (translator && transKey === key) return translator;
     translator = null; transKey = key;
@@ -399,7 +421,7 @@ zrender/lib/zrender.js:
     return translator;
   }
   async function googleTranslate(text){
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${gCode($('src').value)}&tl=${$('tgt').value}&dt=t&q=${encodeURIComponent(text)}`;
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${gCode($('src').value)}&tl=${gCode($('tgt').value)}&dt=t&q=${encodeURIComponent(text)}`;
     const r = await fetch(url); const j = await r.json();
     return (j[0]||[]).map(x=>x[0]).join('');
   }
@@ -434,7 +456,7 @@ zrender/lib/zrender.js:
   async function addFinal(text){
     text = text.trim(); if (!text) return;
     text = (carry ? carry + ' ' : '') + text; carry = ''; clearTimeout(carryTimer);
-    const short = isCJK() ? text.replace(/\s/g,'').length < 6 : text.split(/\s+/).length < 4;
+    const short = isCJK(text) ? text.replace(/\s/g,'').length < 6 : text.split(/\s+/).length < 4;
     if (short && !/[.?!。？！]$/.test(text)){ carry = text; carryTimer = setTimeout(() => { const c = carry; carry = ''; if (c) addFinal(c + '.'); }, 6000); return; }
     const s = {id:++n, src:text, tr:'', cl:'', t:Date.now(), ms:0, cms:0, eng:'', pz:pausedNow()}; segs.push(s); render(s);
     (async () => { const a = performance.now();
@@ -459,8 +481,8 @@ zrender/lib/zrender.js:
   const updClaude = () => document.body.classList.toggle('no-claude', !claudeKey());
   updClaude();
   if (!claudeKey()) $('keyBox').classList.add('open');
-  const tgtName = () => ({'zh-TW':'Taiwan Traditional Chinese (台灣繁體中文, Taiwan wording, never Simplified)','zh-CN':'Simplified Chinese','en':'English','ko':'Korean','ja':'Japanese'})[$('tgt').value];
-  const srcName = () => ({'ko-KR':'Korean','en-US':'English','ja-JP':'Japanese','zh-TW':'Chinese'})[$('src').value];
+  const tgtName = () => ({'zh-TW':'Taiwan Traditional Chinese (台灣繁體中文, Taiwan wording, never Simplified)','zh-HK':'Hong Kong Traditional Chinese (香港繁體中文)','zh-CN':'Simplified Chinese','en':'English','ko':'Korean','ja':'Japanese','vi':'Vietnamese','th':'Thai','id':'Indonesian','es':'Spanish','fr':'French','de':'German'})[$('tgt').value];
+  const srcName = () => ({'auto':'an automatically detected language (identify it yourself; the speaker may switch languages)','ko-KR':'Korean','en-US':'English','ja-JP':'Japanese','zh-TW':'Chinese'})[$('src').value];
   async function claudeCall(prompt, {model, maxTokens = 1000, tools} = {}){
     const body = {model: model || $('model').value, max_tokens: maxTokens, messages: [{role:'user', content: prompt}]};
     if (tools) body.tools = tools;
@@ -505,11 +527,11 @@ ${text}`;
   // ---------- 強制斷句：辨識中的句子太長時，先把前段送去翻譯 ----------
   let sentMap = {};
   const CUT = { short:{w:12,c:25}, mid:{w:20,c:40}, long:{w:35,c:70} };
-  const isCJK = () => /^(ko|ja|zh)/.test($('src').value);
+  const isCJK = t => $('src').value === 'auto' ? /[\u3040-\u30ff\uac00-\ud7af\u4e00-\u9fff]/.test(t || '') : /^(ko|ja|zh)/.test($('src').value);
   function forceCut(pending){
     const mode = $('cutSel').value; if (mode === 'off' || !pending.trim()) return 0;
     const lim = CUT[mode];
-    if (isCJK()){
+    if (isCJK(pending)){
       const t = pending.replace(/\s+$/,'');
       if (t.length < lim.c) return 0;
       // 保留最後 6 個字（還可能被辨識修正），其餘在最近的空白或標點處切
@@ -582,7 +604,12 @@ ${text}`;
     });
   }
   const updBtn = () => { $('mic').classList.toggle('on', running); $('mic').textContent = running ? '⏹ 停止收音' : '🎙 開始收音'; };
-  $('mic').onclick = () => { if (running) stopRec(); else { if (typeof stopMeeting === 'function') stopMeeting(); getTranslator(); startRec(); } };
+  $('mic').onclick = () => {
+    if (running) return stopRec();
+    if (typeof meetOn !== 'undefined' && meetOn && meetFromMic) return stopMeeting();
+    if ($('src').value === 'auto') return startMeeting({fromMic: true});   // 自動判斷語言：麥克風改用 Whisper
+    if (typeof stopMeeting === 'function') stopMeeting(); getTranslator(); startRec();
+  };
   document.addEventListener('visibilitychange', () => { if (document.hidden && running) setSt('分頁在背景，可能暫停收音'); });
 
   // ---------- 線上會議模式：擷取會議 app 的系統聲音 → 瀏覽器內 Whisper 辨識 ----------
@@ -603,7 +630,7 @@ ${text}`;
         if (m.type === 'load'){ await load(m.model); }
         else if (m.type === 'run'){
           await load(m.model);
-          const out = await asr(m.audio, {language: m.lang, task: 'transcribe'});
+          const out = await asr(m.audio, m.lang ? {language: m.lang, task: 'transcribe'} : {task: 'transcribe'});
           postMessage({type:'text', id: m.id, text: (out && out.text || '').trim()});
         }
       } catch(err){ postMessage({type:'error', id: m.id, msg: String(err && err.message || err)}); }
@@ -638,7 +665,7 @@ ${text}`;
   if (LS('lt_wready') === $('wModel').value) $('wStat').textContent = '（已下載過，開會時會直接載入）';
   $('wDl').onclick = () => { wFiles = {}; $('wStat').textContent = '準備下載 Whisper…'; getWorker().postMessage({type:'load', model: $('wModel').value}); };
 
-  const W_LANG = {'en-US':'english', 'ko-KR':'korean', 'ja-JP':'japanese', 'zh-TW':'chinese'};
+  const W_LANG = {'en-US':'english', 'ko-KR':'korean', 'ja-JP':'japanese', 'zh-TW':'chinese', 'auto': null};
   function cleanWhisper(t){
     t = (t || '').replace(/\s+/g, ' ').trim();
     if (!t) return '';
@@ -653,10 +680,10 @@ ${text}`;
     let audio = wQueue.shift();
     while (wQueue.length && audio.length < 16000 * 25){ const nx = wQueue.shift(); const m = new Float32Array(audio.length + nx.length); m.set(audio); m.set(nx, audio.length); audio = m; }
     wBusy = true; $('pt').textContent = '辨識中…';
-    getWorker().postMessage({type:'run', id: ++wJob, model: $('wModel').value, lang: W_LANG[$('src').value] || 'english', audio}, [audio.buffer]);
+    getWorker().postMessage({type:'run', id: ++wJob, model: $('wModel').value, lang: $('src').value in W_LANG ? W_LANG[$('src').value] : 'english', audio}, [audio.buffer]);
   }
 
-  let capPaused = false;
+  let capPaused = false, meetFromMic = false;
   let meetOn = false, meetStream = null, meetCtx = null, meetNode = null, meetLevel = 0, meetTick = null, wMsg = '';
   function meetStatusLine(){
     if (!meetOn) return;
@@ -667,10 +694,15 @@ ${text}`;
   }
   const MAXSEC = {short:6, mid:10, long:15, off:20};
   async function startMeeting(opts = {}){
-    if (running || (mr && mr.state !== 'inactive' && !audioFromStream)) await leaveMic();
-    if (meetOn) stopMeeting();
     // 一定要在按鈕點擊當下建立並啟動，否則 Chrome 會讓它停在「暫停」狀態而收不到任何聲音
-    try { meetCtx = new AudioContext({sampleRate:16000}); meetCtx.resume(); } catch(e){ meetCtx = null; }
+    let ctx0 = null; try { ctx0 = new AudioContext({sampleRate:16000}); ctx0.resume(); } catch(e){}
+    if (!opts.fromMic && (running || (mr && mr.state !== 'inactive' && !audioFromStream))) await leaveMic();
+    if (meetOn) stopMeeting();
+    meetCtx = ctx0; meetFromMic = !!opts.fromMic;
+    if (opts.fromMic && !opts.stream){
+      try { opts.stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true}}); }
+      catch(e){ try{ meetCtx && meetCtx.close(); }catch(_){} meetCtx = null; setSt('⚠ 麥克風未授權'); return; }
+    }
     let st = opts.stream;
     if (!st && !(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)){
       try{ meetCtx && meetCtx.close(); }catch(_){} meetCtx = null;
@@ -721,7 +753,7 @@ ${text}`;
     };
     srcNode.connect(meetNode); meetNode.connect(meetCtx.destination);       // ScriptProcessor 需接到輸出才會運作（輸出為靜音）
     clearInterval(meetTick); meetTick = setInterval(meetStatusLine, 500);
-    setSt(`擷取會議／影片聲音中（${$('src').options[$('src').selectedIndex].text.replace('講者：','')}，Whisper 辨識）`, true);
+    setSt(meetFromMic ? `麥克風收音中（${$('src').options[$('src').selectedIndex].text.replace('講者：','')}，Whisper 辨識）` : `擷取會議／影片聲音中（${$('src').options[$('src').selectedIndex].text.replace('講者：','')}，Whisper 辨識）`, true);
     $('pt').textContent = '聆聽會議中…';
   }
   function stopMeeting(){
@@ -730,11 +762,15 @@ ${text}`;
     try { meetNode && meetNode.disconnect(); meetCtx && meetCtx.close(); } catch(e){}
     if (!meetStream || !meetStream.__fromVideo) meetStream && meetStream.getTracks().forEach(t => t.stop());
     meetStream = null; meetNode = null; meetCtx = null;
-    updMeet(); setSt('會議／影片收音已停止'); micBack();
+    const wasMic = meetFromMic; meetFromMic = false; updMeet(); setSt(wasMic ? '收音已停止' : '會議／影片收音已停止'); micBack();
   }
-  const updMeet = () => { if (meetOn){ $('mic').disabled = true; }
-    $('meetBtn').classList.toggle('on', meetOn); $('meetBtn').textContent = meetOn ? '⏹ 停止擷取' : '🖥 會議／影片'; $('meetBtn').style.background = meetOn ? 'var(--warn)' : ''; };
-  $('meetBtn').onclick = () => meetOn ? stopMeeting() : startMeeting();
+  const updMeet = () => {
+    if (meetOn && meetFromMic){ $('mic').disabled = false; $('mic').classList.add('on'); $('mic').textContent = '⏹ 停止收音'; }
+    else if (meetOn){ $('mic').disabled = true; }
+    else { $('mic').classList.toggle('on', running); $('mic').textContent = running ? '⏹ 停止收音' : '🎙 開始收音'; }
+    const capOn = meetOn && !meetFromMic;
+    $('meetBtn').classList.toggle('on', capOn); $('meetBtn').textContent = capOn ? '⏹ 停止擷取' : '🖥 會議／影片'; $('meetBtn').style.background = capOn ? 'var(--warn)' : ''; };
+  $('meetBtn').onclick = () => (meetOn && !meetFromMic) ? stopMeeting() : startMeeting();
 
   $('typeIn').onkeydown = e => { if (e.key==='Enter'){ const v = e.target.value.trim(); if (v) addFinal(/[.?!。？！]$/.test(v) ? v : v + '.'); e.target.value=''; } };
 
