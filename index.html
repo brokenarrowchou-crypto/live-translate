@@ -61,6 +61,14 @@
   body.split #frames{flex-direction:column;min-width:260px;border-left:2px solid #8a5cf6}
   body.split .frame{border-left:none}
   body.split #fG{border-top:2px solid var(--line)}
+  body.eng-claude #fG, body.eng-google #fC{display:none!important}
+  body.eng-claude.split #fC, body.eng-google.split #fG{border-top:none}
+  /* 字幕放在影片下方 */
+  body.below.split #stage{flex-direction:column}
+  body.below.split #slidePane{flex:0 0 var(--slideH,62%)!important;width:100%}
+  body.below.split #frames{flex:1;flex-direction:row;min-width:0;border-left:none;border-top:2px solid #8a5cf6}
+  body.below.split #fG{border-top:none;border-left:1px solid var(--line)}
+  body.below.split .zh{font-size:calc(var(--fs)*1.0)}
   body.split .notice{margin:8px 0}
   body.split .zh{font-size:calc(var(--fs)*.8)}
   #slideHost{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
@@ -142,7 +150,7 @@
   <div class="brk"></div>
   <div class="grp g-class" data-label="課堂"><input id="course" placeholder="課堂名稱（選填）" title="存檔檔名會用：西元日期＋課堂名稱" class="course"><button id="md">💾 存 .md</button><button id="endBtn" style="background:#3b1d24;border-color:var(--warn);color:#ffb4a8;font-weight:700">🏁 本課堂結束</button><button id="clear">清除</button></div>
   <div class="grp g-content" data-label="內容"><button id="slideBtn">📊 載入簡報</button><input id="slideFile" type="file" accept=".pptx,.pdf" hidden><button id="agBtn" title="上傳議程 PDF 或貼上網址，依時間自動對應場次">📅 議程</button><button id="cleanBtn">隱藏工具列</button></div>
-  <div class="grp g-view" data-label="顯示"><button id="down">A−</button><button id="up">A+</button><button id="togSrc">原文 ✓</button><button id="fsBtn" title="全螢幕（隱藏 Chrome 工具列），快捷鍵 F11 或 F">⛶ 全螢幕</button><button id="keyBtn">🔑 Claude</button></div>
+  <div class="grp g-view" data-label="顯示"><select id="engSel" title="要顯示哪一種翻譯"><option value="both">Claude＋Google</option><option value="claude">只用 Claude</option><option value="google">只用 Google</option></select><select id="laySel" title="翻譯框放在影片／投影片的哪一邊"><option value="right">字幕在右</option><option value="below">字幕在下</option></select><button id="down">A−</button><button id="up">A+</button><button id="togSrc">原文 ✓</button><button id="fsBtn" title="全螢幕（隱藏 Chrome 工具列），快捷鍵 F11 或 F">⛶ 全螢幕</button><button id="keyBtn">🔑 Claude</button></div>
 </header>
 <div id="keyBox">
   <span>Anthropic API key：</span><input id="key" type="password" placeholder="sk-ant-…（只存在這台電腦的瀏覽器裡）">
@@ -402,6 +410,20 @@ zrender/lib/zrender.js:
     if (typeof meetOn !== 'undefined' && meetOn) setSt(`擷取會議／影片聲音中（${$('src').options[$('src').selectedIndex].text.replace('講者：','')}，Whisper 辨識）`, true); };
   $('tgt').onchange = () => { updDir(); try { localStorage.setItem('lt_tgt', $('tgt').value); } catch(e){} toast('之後的句子會翻成：' + $('tgt').options[$('tgt').selectedIndex].text); }; updDir();
 
+  // 翻譯引擎與字幕位置（記住選擇）
+  const engMode = () => $('engSel').value;
+  function applyView(){
+    document.body.classList.toggle('eng-claude', engMode() === 'claude');
+    document.body.classList.toggle('eng-google', engMode() === 'google');
+    document.body.classList.toggle('below', $('laySel').value === 'below');
+    try { localStorage.setItem('lt_eng', engMode()); localStorage.setItem('lt_lay', $('laySel').value); } catch(e){}
+    if (typeof renderDeck === 'function') setTimeout(renderDeck, 0);
+  }
+  try { $('engSel').value = localStorage.getItem('lt_eng') || 'both'; $('laySel').value = localStorage.getItem('lt_lay') || 'right'; } catch(e){}
+  $('engSel').onchange = () => { applyView(); if (engMode() === 'claude' && !claudeKey()) toast('只用 Claude 需要先設定 API key（按 🔑 Claude）'); };
+  $('laySel').onchange = applyView;
+  applyView();
+
   // ---------- translation ----------
   const apiCode = c => ({'zh-TW':'zh-Hant','zh-HK':'zh-Hant','zh-CN':'zh','en-US':'en','ko-KR':'ko','ja-JP':'ja'})[c] || c;
   const gCode = c => ({'en-US':'en','ko-KR':'ko','ja-JP':'ja','zh-HK':'zh-TW'})[c] || c;
@@ -460,10 +482,10 @@ zrender/lib/zrender.js:
     const short = isCJK(text) ? text.replace(/\s/g,'').length < 6 : text.split(/\s+/).length < 4;
     if (short && !/[.?!。？！]$/.test(text)){ carry = text; carryTimer = setTimeout(() => { const c = carry; carry = ''; if (c) addFinal(c + '.'); }, 6000); return; }
     const s = {id:++n, src:text, tr:'', cl:'', t:Date.now(), ms:0, cms:0, eng:'', pz:pausedNow()}; segs.push(s); render(s);
-    (async () => { const a = performance.now();
+    if (engMode() !== 'claude') (async () => { const a = performance.now();
       try { s.tr = await translate(text); s.eng = engine; } catch(e){ s.tr = '（翻譯失敗，請確認網路）'; }
       s.ms = performance.now() - a; render(s); })();
-    if (claudeKey()) (async () => { const a = performance.now();
+    if (claudeKey() && engMode() !== 'google') (async () => { const a = performance.now();
       try { s.cl = await claudeTranslate(text, t => { s.cl = t; render(s); }); ctx.push({src:text, tr:s.cl}); if (ctx.length>4) ctx.shift(); }
       catch(e){ s.cl = '（Claude 失敗：' + e.message + '）'; }
       s.cms = performance.now() - a; render(s); })();
@@ -812,6 +834,11 @@ ${text}`;
   let deck = null;
   function layoutSplit(aspect){
     const st = $('stage'), W = st.clientWidth, H = st.clientHeight; if (!W || !H) return;
+    if (document.body.classList.contains('below')){
+      // 影片在上：寬度填滿，高度依比例，至少留 28% 給字幕
+      const sh = Math.max(H * 0.45, Math.min(W / aspect + 8, H * 0.72));
+      document.body.style.setProperty('--slideH', Math.round(sh) + 'px'); void slidePane.offsetHeight; return;
+    }
     const capMin = Math.max(260, W * 0.24);
     let sw = Math.min(H * aspect + 8, W - capMin); sw = Math.max(sw, W * 0.45);
     document.body.style.setProperty('--slideW', Math.round(sw) + 'px'); void slidePane.offsetWidth;
