@@ -19,10 +19,17 @@
   /* ---- 工具列分組 ---- */
   .grp{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:0 8px;border-left:1px solid var(--line)}
   .grp.g-title{border-left:none;padding-left:0;flex:1 1 auto;min-width:0}
+  .brk{flex-basis:100%;height:0}
+  .grp.g-class{border-left:none;padding-left:0}
+  @media (min-width: 821px){
+    .grp:not(.g-title)::before{content:attr(data-label);font-size:11px;color:var(--muted);margin-right:2px}
+    .grp.g-view{margin-left:auto}
+  }
   .grp .course{width:160px;font:inherit;font-size:14px;color:var(--text);background:#14121c;border:1px solid var(--line);border-radius:8px;padding:6px 8px}
   #agNow{font-size:13px}
   @media (max-width: 820px){
     header{display:grid;grid-template-columns:1fr;gap:6px;padding:8px}
+    .brk{display:none}
     .grp{border-left:none;padding:0;gap:5px;position:relative}
     .grp:not(.g-title){padding-left:40px}
     .grp:not(.g-title)::before{content:attr(data-label);position:absolute;left:0;top:7px;font-size:12px;color:var(--muted)}
@@ -123,8 +130,9 @@
     <option value="long">斷句：長（較完整）</option>
     <option value="off">斷句：關閉</option>
   </select></div>
-  <div class="grp g-content" data-label="內容"><button id="slideBtn">📊 載入簡報</button><input id="slideFile" type="file" accept=".pptx,.pdf" hidden><button id="agBtn" title="上傳議程 PDF 或貼上網址，依時間自動對應場次">📅 議程</button><button id="cleanBtn">隱藏工具列</button></div>
+  <div class="brk"></div>
   <div class="grp g-class" data-label="課堂"><input id="course" placeholder="課堂名稱（選填）" title="存檔檔名會用：西元日期＋課堂名稱" class="course"><button id="md">💾 存 .md</button><button id="endBtn" style="background:#3b1d24;border-color:var(--warn);color:#ffb4a8;font-weight:700">🏁 本課堂結束</button><button id="clear">清除</button></div>
+  <div class="grp g-content" data-label="內容"><button id="slideBtn">📊 載入簡報</button><input id="slideFile" type="file" accept=".pptx,.pdf" hidden><button id="agBtn" title="上傳議程 PDF 或貼上網址，依時間自動對應場次">📅 議程</button><button id="cleanBtn">隱藏工具列</button></div>
   <div class="grp g-view" data-label="顯示"><button id="down">A−</button><button id="up">A+</button><button id="togSrc">原文 ✓</button><button id="keyBtn">🔑 Claude</button></div>
 </header>
 <div id="keyBox">
