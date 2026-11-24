@@ -163,7 +163,7 @@
   <select id="model"><option value="claude-haiku-5-5">Haiku（最快）</option><option value="claude-sonnet-5-5">Sonnet（較準）</option></select>
   <input id="topic" placeholder="演講主題（選填，例：OIC、ketamine）" style="min-width:200px">
   <button id="keySave">儲存</button>
-  <span style="margin-left:12px">線上會議辨識：</span><select id="wModel"><option value="onnx-community/whisper-base">Whisper base（約 150 MB，快）</option><option value="onnx-community/whisper-small">Whisper small（約 450 MB，較準）</option></select>
+  <span style="margin-left:12px">網頁影片取聲：</span><select id="capSel"><option value="tab">只分享這個分頁</option><option value="screen">分享整個螢幕（提示可縮小）</option></select><span style="margin-left:12px">線上會議辨識：</span><select id="wModel"><option value="onnx-community/whisper-base">Whisper base（約 150 MB，快）</option><option value="onnx-community/whisper-small">Whisper small（約 450 MB，較準）</option></select>
   <button id="wDl">⬇ 預先下載</button><span id="wStat" style="color:#ffd98a"></span>
 
   <span style="margin-left:12px">測試：</span><input id="typeIn" placeholder="測試：貼上一句原文按 Enter" style="flex:1 1 240px;min-width:200px;font:inherit;font-size:13px;color:var(--text);background:#14121c;border:1px solid var(--line);border-radius:8px;padding:7px">
@@ -508,6 +508,7 @@ zrender/lib/zrender.js:
   const ctx = [];
   const LS = (k, v) => { try { if (v === undefined) return localStorage.getItem(k) || ''; localStorage.setItem(k, v); } catch(e){ return ''; } };
   const claudeKey = () => $('key').value.trim();
+  $('capSel').value = LS('lt_cap') || 'tab'; $('capSel').onchange = e => { LS('lt_cap', e.target.value); if (e.target.value === 'screen') toast('下次擷取會分享整個螢幕：記得勾「同時分享系統音訊」，開始後按小視窗的「隱藏」'); };
   $('cutSel').value = LS('lt_cut') || 'mid'; $('cutSel').onchange = e => LS('lt_cut', e.target.value);
   $('course').value = LS('lt_course'); $('course').oninput = e => LS('lt_course', e.target.value);
   $('key').value = LS('lt_key'); $('model').value = LS('lt_model') || 'claude-haiku-5-5'; $('topic').value = LS('lt_topic');
@@ -767,7 +768,9 @@ ${text}`;
       setSt('⚠ ' + msg); toast(msg); return;
     }
     if (!st) try {
-      st = await navigator.mediaDevices.getDisplayMedia(opts.thisTab
+      st = await navigator.mediaDevices.getDisplayMedia(opts.thisTab && $('capSel').value === 'screen'
+        ? {video:{displaySurface:'monitor'}, audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}, systemAudio:'include', selfBrowserSurface:'include', monitorTypeSurfaces:'include'}
+        : opts.thisTab
         ? {video:true, audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}, preferCurrentTab:true, selfBrowserSurface:'include'}
         : {video:true, audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}, systemAudio:'include', selfBrowserSurface:'exclude'});
     } catch(e){ toast('已取消分享'); try{ meetCtx && meetCtx.close(); }catch(_){} meetCtx = null; return; }
@@ -1022,13 +1025,13 @@ ${text}`;
   let gateBtn = null;
   function addTabGate(box, isPlaying){
     const gate = gateBtn = document.createElement('button');
-    gate.textContent = '🔊 允許擷取這個分頁的聲音（播放前按一次）';
+    gate.textContent = $('capSel').value === 'screen' ? '🔊 分享整個螢幕＋系統音訊（播放前按一次）' : '🔊 允許擷取這個分頁的聲音（播放前按一次）';
     gate.style.cssText = 'position:absolute;left:50%;top:12px;transform:translateX(-50%);z-index:3;background:var(--accent);color:#1a1606;font-weight:700;border:none;padding:8px 14px;border-radius:10px';
     box.appendChild(gate);
     gate.onclick = async () => {
       await startMeeting({thisTab:true});
       if (meetOn){ gate.remove(); setPlaying(isPlaying()); toast('準備好了，按影片播放就會開始錄音與翻譯'); }
-      else toast('沒有擷取到聲音：請選「這個分頁」並保持「分享分頁音訊」勾選');
+      else toast($('capSel').value === 'screen' ? '沒有擷取到聲音：請選「整個螢幕」並勾選「同時分享系統音訊」' : '沒有擷取到聲音：請選「這個分頁」並保持「分享分頁音訊」勾選');
     };
   }
   $('ytLoad').onclick = async () => {
@@ -1057,7 +1060,7 @@ ${text}`;
     const holder = document.createElement('div'); holder.style.cssText = 'width:100%;height:100%';
     const box = showInPane(holder);
     const gate = gateBtn = document.createElement('button');
-    gate.textContent = '🔊 允許擷取這個分頁的聲音（播放前按一次）';
+    gate.textContent = $('capSel').value === 'screen' ? '🔊 分享整個螢幕＋系統音訊（播放前按一次）' : '🔊 允許擷取這個分頁的聲音（播放前按一次）';
     gate.style.cssText = 'position:absolute;left:50%;top:12px;transform:translateX(-50%);z-index:3;background:var(--accent);color:#1a1606;font-weight:700;border:none;padding:8px 14px;border-radius:10px';
     box.appendChild(gate);
     const player = new YT.Player(holder, {videoId: id, width: '100%', height: '100%', playerVars: {rel: 0, playsinline: 1},
@@ -1077,7 +1080,7 @@ ${text}`;
     gate.onclick = async () => {
       await startMeeting({thisTab:true});
       if (meetOn){ gate.remove(); setPlaying(player.getPlayerState && player.getPlayerState() === 1); toast('準備好了，按影片播放就會開始錄音與翻譯'); }
-      else toast('沒有擷取到聲音：請選「這個分頁」並保持「分享分頁音訊」勾選');
+      else toast($('capSel').value === 'screen' ? '沒有擷取到聲音：請選「整個螢幕」並勾選「同時分享系統音訊」' : '沒有擷取到聲音：請選「這個分頁」並保持「分享分頁音訊」勾選');
     };
   };
   $('slClose').addEventListener('click', () => closeVideo(false));
