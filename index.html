@@ -376,7 +376,8 @@ zrender/lib/zrender.js:
   $('tgt').value = dl.startsWith('zh') ? (/cn|hans|sg/.test(dl)?'zh-CN':'zh-TW') : (['en','ko','ja'].find(x=>dl.startsWith(x)) || 'zh-TW');
   const short = {'ko-KR':'KO','en-US':'EN','ja-JP':'JA','zh-TW':'ZH','zh-CN':'简中','en':'EN','ko':'KO','ja':'JA'};
   const updDir = () => { $('dir').textContent = `${short[$('src').value]} → ${$('tgt').value==='zh-TW'?'繁中':short[$('tgt').value]}`; translator=null; };
-  $('src').onchange = () => { updDir(); if (running){ stopRec(); setTimeout(startRec, 300); } };
+  $('src').onchange = () => { updDir(); if (running){ stopRec(); setTimeout(startRec, 300); }
+    if (typeof meetOn !== 'undefined' && meetOn) setSt(`擷取會議／影片聲音中（${$('src').options[$('src').selectedIndex].text.replace('講者：','')}，Whisper 辨識）`, true); };
   $('tgt').onchange = updDir; updDir();
 
   // ---------- translation ----------
@@ -556,8 +557,10 @@ ${text}`;
   function stopRec(){ running = false; try { rec && rec.stop(); } catch(e){} }
   // ---------- audio recording (MediaRecorder, runs from first 開始收音 until 本課堂結束) ----------
   let media = null, mr = null, chunks = [], recStart = 0, recTimer = null, audioExt = 'webm';
+  let audioFromStream = false;
   async function startAudio(stream){
     if (mr && mr.state !== 'inactive') return;
+    audioFromStream = !!stream;
     try {
       media = stream || await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:true}});
       const type = ['audio/webm;codecs=opus','audio/webm','audio/mp4'].find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
@@ -664,7 +667,7 @@ ${text}`;
   }
   const MAXSEC = {short:6, mid:10, long:15, off:20};
   async function startMeeting(opts = {}){
-    if (running) stopRec();
+    if (running || (mr && mr.state !== 'inactive' && !audioFromStream)) await leaveMic();
     if (meetOn) stopMeeting();
     // 一定要在按鈕點擊當下建立並啟動，否則 Chrome 會讓它停在「暫停」狀態而收不到任何聲音
     try { meetCtx = new AudioContext({sampleRate:16000}); meetCtx.resume(); } catch(e){ meetCtx = null; }
@@ -727,9 +730,10 @@ ${text}`;
     try { meetNode && meetNode.disconnect(); meetCtx && meetCtx.close(); } catch(e){}
     if (!meetStream || !meetStream.__fromVideo) meetStream && meetStream.getTracks().forEach(t => t.stop());
     meetStream = null; meetNode = null; meetCtx = null;
-    updMeet(); setSt('會議／影片收音已停止');
+    updMeet(); setSt('會議／影片收音已停止'); micBack();
   }
-  const updMeet = () => { $('meetBtn').classList.toggle('on', meetOn); $('meetBtn').textContent = meetOn ? '⏹ 停止擷取' : '🖥 會議／影片'; $('meetBtn').style.background = meetOn ? 'var(--warn)' : ''; };
+  const updMeet = () => { if (meetOn){ $('mic').disabled = true; }
+    $('meetBtn').classList.toggle('on', meetOn); $('meetBtn').textContent = meetOn ? '⏹ 停止擷取' : '🖥 會議／影片'; $('meetBtn').style.background = meetOn ? 'var(--warn)' : ''; };
   $('meetBtn').onclick = () => meetOn ? stopMeeting() : startMeeting();
 
   $('typeIn').onkeydown = e => { if (e.key==='Enter'){ const v = e.target.value.trim(); if (v) addFinal(/[.?!。？！]$/.test(v) ? v : v + '.'); e.target.value=''; } };
@@ -843,7 +847,20 @@ ${text}`;
   $('vidBtn').onclick = () => { $('vidPanel').style.display = 'flex'; $('ytUrl').focus(); };
   $('vidClose').onclick = () => $('vidPanel').style.display = 'none';
   function ytId(u){ const m = String(u).match(/(?:youtu\.be\/|v=|\/shorts\/|\/embed\/|\/live\/)([\w-]{11})/); return m ? m[1] : (/^[\w-]{11}$/.test(u) ? u : null); }
+  // 改用影片／會議聲音時：停掉麥克風辨識；麥克風錄到一半的內容先自動存檔，避免混進外面的聲音
+  async function leaveMic(){
+    const micRec = mr && mr.state !== 'inactive' && !audioFromStream;
+    if (running || micRec){
+      if (segs.length || micRec){ await endClass(true, true); toast('已先把麥克風收音的內容存檔，接下來只翻譯影片／會議的聲音');
+        document.querySelectorAll('#frames .seg').forEach(e => e.remove()); segs.length = 0; ctx.length = 0; t0 = 0; $('course').value = ''; LS('lt_course', ''); }
+      else stopRec();
+    }
+    $('mic').disabled = true; $('mic').title = '影片／會議模式中不使用麥克風；關閉影片或停止擷取後才能用';
+  }
+  function micBack(){ if (!vid && !meetOn){ $('mic').disabled = false; $('mic').title = ''; } }
+  let micLeaving = Promise.resolve();
   function showInPane(node){
+    micLeaving = leaveMic();
     if (deck) closeDeck();
     closeVideo(true);
     document.body.classList.add('split'); layoutSplit(16/9);
@@ -858,6 +875,7 @@ ${text}`;
     try { vid.player && vid.player.destroy && vid.player.destroy(); } catch(e){}
     if (vid.url) URL.revokeObjectURL(vid.url);
     vid = null; capPaused = false;
+    setTimeout(micBack, 0);
     if (!keepSplit){ slideHost.innerHTML = ''; document.body.classList.remove('split'); document.body.style.removeProperty('--slideW'); $('slNum').textContent = '–'; }
   }
   const setPlaying = playing => {
@@ -873,7 +891,7 @@ ${text}`;
     const url = URL.createObjectURL(f), v = document.createElement('video');
     v.src = url; v.controls = true; v.playsInline = true; v.style.cssText = 'width:100%;height:100%;background:#000';
     showInPane(v); vid = {kind:'file', el:v, url};
-    if (!$('course').value.trim()) { $('course').value = f.name.replace(/\.[^.]+$/, '').slice(0, 60); LS('lt_course', $('course').value); }
+    micLeaving.then(() => { if (!$('course').value.trim()) { $('course').value = f.name.replace(/\.[^.]+$/, '').slice(0, 60); LS('lt_course', $('course').value); } });
     const begin = () => { if (meetOn) return; const st = v.captureStream(); if (!st.getAudioTracks().length) return false; st.__fromVideo = true; startMeeting({stream: st}); return true; };
     v.addEventListener('play', () => { if (begin() === false) v.addEventListener('playing', begin, {once:true}); setPlaying(true); });
     v.addEventListener('pause', () => setPlaying(false));
@@ -887,7 +905,7 @@ ${text}`;
   function mountVideoEl(v, title){
     v.controls = true; v.playsInline = true; v.style.cssText = 'width:100%;height:100%;background:#000';
     showInPane(v);
-    if (title && !$('course').value.trim()) { $('course').value = title.slice(0, 60); LS('lt_course', $('course').value); }
+    if (title) micLeaving.then(() => { if (!$('course').value.trim()) { $('course').value = title.slice(0, 60); LS('lt_course', $('course').value); } });
     const begin = () => { if (meetOn) return true; let st; try { st = v.captureStream(); } catch(e){ return 'blocked'; }
       if (!st.getAudioTracks().length) return false; st.__fromVideo = true; startMeeting({stream: st}); return true; };
     v.addEventListener('play', () => { const r = begin(); if (r === false) v.addEventListener('playing', begin, {once:true});
@@ -947,7 +965,7 @@ ${text}`;
             toast('影片在播，但還沒擷取聲音 → 請按影片上方的黃色按鈕');
           }
         },
-        onReady: () => { try { const t = player.getVideoData().title; if (t && !$('course').value.trim()){ $('course').value = t.slice(0, 60); LS('lt_course', $('course').value); } } catch(_){} },
+        onReady: () => micLeaving.then(() => { try { const t = player.getVideoData().title; if (t && !$('course').value.trim()){ $('course').value = t.slice(0, 60); LS('lt_course', $('course').value); } } catch(_){} }),
         onError: e => { if (e.data === 101 || e.data === 150) toast('這支影片不允許嵌入播放：請改在 YouTube 分頁播放，用「🖥 會議／影片」擷取'); }
       }});
     vid = {kind:'yt', player};
