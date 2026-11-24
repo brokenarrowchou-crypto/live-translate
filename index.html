@@ -92,6 +92,7 @@
   .cols-head{position:sticky;top:-16px;z-index:2;display:grid;grid-template-columns:1fr 1fr;gap:18px;background:var(--bg);padding:8px 0;border-bottom:2px solid var(--line);font-size:14px;font-weight:700}
   .cols-head .c{color:#d9a5ff}.cols-head .g{color:#7fb6ff}
   .seg{padding:10px 0;border-bottom:1px dashed var(--line)}
+  .seg.live .src{color:#cfc8e8;font-style:italic;font-size:calc(var(--fs)*.7)} .seg.live .meta{color:#8a83a8}
   .pair{display:grid;grid-template-columns:1fr 1fr;gap:18px}
   .pair .zh{padding-left:10px;border-left:3px solid #8a5cf6}.pair .zh.g{border-left-color:#3b82f6}
   body.only-c .pair{grid-template-columns:1fr} body.only-c .zh.g, body.only-c .cols-head .g{display:none}
@@ -463,7 +464,7 @@ zrender/lib/zrender.js:
       try { s.tr = await translate(text); s.eng = engine; } catch(e){ s.tr = '（翻譯失敗，請確認網路）'; }
       s.ms = performance.now() - a; render(s); })();
     if (claudeKey()) (async () => { const a = performance.now();
-      try { s.cl = await claudeTranslate(text); ctx.push({src:text, tr:s.cl}); if (ctx.length>4) ctx.shift(); }
+      try { s.cl = await claudeTranslate(text, t => { s.cl = t; render(s); }); ctx.push({src:text, tr:s.cl}); if (ctx.length>4) ctx.shift(); }
       catch(e){ s.cl = '（Claude 失敗：' + e.message + '）'; }
       s.cms = performance.now() - a; render(s); })();
   }
@@ -495,7 +496,7 @@ zrender/lib/zrender.js:
     if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
     return (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('').trim();
   }
-  async function claudeTranslate(text){
+  async function claudeTranslate(text, onDelta){
     const topic = $('topic').value.trim();
     const prior = ctx.slice(-3).map(c => `SRC: ${c.src}\nOUT: ${c.tr}`).join('\n');
     const prompt = `You are a live interpreter at an academic medical conference (pain medicine / anesthesiology). Translate the NEW ${srcName()} speech-recognition segment into ${tgtName()}.
@@ -509,14 +510,24 @@ Rules:
 
 NEW segment:
 ${text}`;
+    // 串流回傳：譯文一邊產生一邊顯示，不等整句完成
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {'x-api-key': claudeKey(), 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true'},
-      body: JSON.stringify({model: $('model').value, max_tokens: 500, messages: [{role: 'user', content: prompt}]})
+      body: JSON.stringify({model: $('model').value, max_tokens: 500, stream: true, messages: [{role: 'user', content: prompt}]})
     });
-    const j = await r.json();
-    if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
-    return (j.content || []).map(c => c.text || '').join('').trim();
+    if (!r.ok){ let j = {}; try { j = await r.json(); } catch(_){} throw new Error((j.error && j.error.message) || ('HTTP ' + r.status)); }
+    const rd = r.body.getReader(), dec = new TextDecoder(); let buf = '', out = '';
+    for (;;){
+      const {value, done} = await rd.read(); if (done) break;
+      buf += dec.decode(value, {stream: true});
+      let i; while ((i = buf.indexOf('\n')) >= 0){
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (!line.startsWith('data:')) continue;
+        try { const ev = JSON.parse(line.slice(5)); if (ev.type === 'content_block_delta' && ev.delta && ev.delta.text){ out += ev.delta.text; onDelta && onDelta(out); } if (ev.type === 'error') throw new Error(ev.error && ev.error.message || 'stream error'); } catch(e){ if (e.message && !/JSON/.test(e.message)) throw e; }
+      }
+    }
+    return out.trim();
   }
 
   // ---------- speech recognition ----------
@@ -628,10 +639,10 @@ ${text}`;
       const m = e.data;
       try {
         if (m.type === 'load'){ await load(m.model); }
-        else if (m.type === 'run'){
+        else if (m.type === 'run' || m.type === 'partial'){
           await load(m.model);
           const out = await asr(m.audio, m.lang ? {language: m.lang, task: 'transcribe'} : {task: 'transcribe'});
-          postMessage({type:'text', id: m.id, text: (out && out.text || '').trim()});
+          postMessage({type: m.type === 'run' ? 'text' : 'partial', id: m.id, text: (out && out.text || '').trim()});
         }
       } catch(err){ postMessage({type:'error', id: m.id, msg: String(err && err.message || err)}); }
     };`;
@@ -650,8 +661,10 @@ ${text}`;
       } else if (m.type === 'ready'){
         wReady = true; $('wStat').textContent = `✓ Whisper 已就緒（${m.device === 'webgpu' ? '顯示卡加速' : 'CPU 模式，較慢'}）`;
         LS('lt_wready', $('wModel').value);
+      } else if (m.type === 'partial'){
+        wBusy = false; const t = cleanWhisper(m.text); if (t && meetOn) showLive(t); pumpWhisper();
       } else if (m.type === 'text'){
-        wBusy = false; const t = cleanWhisper(m.text); if (t) addFinal(/[.?!。？！]$/.test(t) ? t : t + '.');
+        wBusy = false; showLive(''); const t = cleanWhisper(m.text); if (t) addFinal(/[.?!。？！]$/.test(t) ? t : t + '.');
         $('pt').textContent = wQueue.length ? `辨識中…（排隊 ${wQueue.length} 段）` : (meetOn ? '聆聽會議中…' : '—');
         pumpWhisper();
       } else if (m.type === 'error'){
@@ -674,6 +687,15 @@ ${text}`;
     const w = t.split(' '); if (w.length > 8 && new Set(w).size / w.length < 0.3) return '';                   // 重複幻聽
     return t;
   }
+  // 「辨識中」即時預覽：還沒斷句前，先在兩個翻譯框底部顯示目前聽到的原文
+  function showLive(t){
+    for (const box of [outC, outG]){
+      let g = box.querySelector('.live'); if (!t){ g && g.remove(); continue; }
+      if (!g){ g = document.createElement('div'); g.className = 'seg live'; g.innerHTML = '<div class="src"></div><div class="meta">聽到的原文（翻譯中…）</div>'; }
+      const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 160;
+      box.appendChild(g); g.querySelector('.src').textContent = t; if (stick) box.scrollTop = box.scrollHeight;
+    }
+  }
   function pumpWhisper(){
     if (wBusy || !wQueue.length) return;
     // 排隊太長時把相鄰片段合併，避免越拖越晚
@@ -692,7 +714,7 @@ ${text}`;
     const w = wBusy ? '辨識中…' : (wQueue.length ? `排隊 ${wQueue.length} 段` : (wReady ? '等待說話' : (wMsg || '載入 Whisper 中…')));
     $('pt').textContent = `音量 ${meter}　｜　${w}` + (meetLevel < 0.002 ? '　⚠ 幾乎沒有聲音：確認影片在播放、YouTube 音量沒有調低、分享時有勾選音訊' : '');
   }
-  const MAXSEC = {short:6, mid:10, long:15, off:20};
+  const MAXSEC = {short:4, mid:7, long:12, off:20};
   async function startMeeting(opts = {}){
     // 一定要在按鈕點擊當下建立並啟動，否則 Chrome 會讓它停在「暫停」狀態而收不到任何聲音
     let ctx0 = null; try { ctx0 = new AudioContext({sampleRate:16000}); ctx0.resume(); } catch(e){}
@@ -733,7 +755,14 @@ ${text}`;
     let buf = [], len = 0, speechLen = 0, silentRun = 0, noise = 0.005;
     const flush = () => {
       if (len && speechLen > 16000 * 0.5){ const a = new Float32Array(len); let o = 0; for (const b of buf){ a.set(b, o); o += b.length; } wQueue.push(a); pumpWhisper(); }
-      buf = []; len = 0; speechLen = 0; silentRun = 0;
+      buf = []; len = 0; speechLen = 0; silentRun = 0; lastPartial = 0;
+    };
+    // 每 1.2 秒，Whisper 有空時先辨識目前這段（只做預覽，不翻譯）
+    let lastPartial = 0;
+    const tryPartial = () => {
+      if (wBusy || wQueue.length || !wReady || speechLen < 16000 * 1.2 || len - lastPartial < 16000 * 1.0) return;
+      lastPartial = len; const a = new Float32Array(len); let o = 0; for (const b of buf){ a.set(b, o); o += b.length; }
+      wBusy = true; getWorker().postMessage({type:'partial', id: ++wJob, model: $('wModel').value, lang: $('src').value in W_LANG ? W_LANG[$('src').value] : 'english', audio: a}, [a.buffer]);
     };
     meetNode.onaudioprocess = e => {
       const d = e.inputBuffer.getChannelData(0), f = new Float32Array(d);
@@ -748,7 +777,7 @@ ${text}`;
       buf.push(f); len += f.length;
       if (speaking){ speechLen += f.length; silentRun = 0; } else silentRun += f.length;
       const maxSec = MAXSEC[$('cutSel').value] || 10;
-      if ((silentRun > 16000 * 0.7 && len > 16000 * 1.5) || len > 16000 * maxSec) flush();
+      if ((silentRun > 16000 * 0.45 && len > 16000 * 1.0) || len > 16000 * maxSec) flush(); else tryPartial();
       if (silentRun > 16000 * 4 && speechLen < 16000 * 0.5) { buf = []; len = 0; speechLen = 0; silentRun = 0; }
     };
     srcNode.connect(meetNode); meetNode.connect(meetCtx.destination);       // ScriptProcessor 需接到輸出才會運作（輸出為靜音）
