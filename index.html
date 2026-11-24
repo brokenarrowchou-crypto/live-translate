@@ -133,7 +133,7 @@
   <div class="brk"></div>
   <div class="grp g-class" data-label="課堂"><input id="course" placeholder="課堂名稱（選填）" title="存檔檔名會用：西元日期＋課堂名稱" class="course"><button id="md">💾 存 .md</button><button id="endBtn" style="background:#3b1d24;border-color:var(--warn);color:#ffb4a8;font-weight:700">🏁 本課堂結束</button><button id="clear">清除</button></div>
   <div class="grp g-content" data-label="內容"><button id="slideBtn">📊 載入簡報</button><input id="slideFile" type="file" accept=".pptx,.pdf" hidden><button id="agBtn" title="上傳議程 PDF 或貼上網址，依時間自動對應場次">📅 議程</button><button id="cleanBtn">隱藏工具列</button></div>
-  <div class="grp g-view" data-label="顯示"><button id="down">A−</button><button id="up">A+</button><button id="togSrc">原文 ✓</button><button id="keyBtn">🔑 Claude</button></div>
+  <div class="grp g-view" data-label="顯示"><button id="down">A−</button><button id="up">A+</button><button id="togSrc">原文 ✓</button><button id="fsBtn" title="全螢幕（隱藏 Chrome 工具列），快捷鍵 F11 或 F">⛶ 全螢幕</button><button id="keyBtn">🔑 Claude</button></div>
 </header>
 <div id="keyBox">
   <span>Anthropic API key：</span><input id="key" type="password" placeholder="sk-ant-…（只存在這台電腦的瀏覽器裡）">
@@ -821,6 +821,9 @@ ${text}`;
   slidePane.addEventListener('click', e => { if (deck && !e.target.closest('#slideNav')) go(e.clientX > slidePane.getBoundingClientRect().left + slidePane.clientWidth/3 ? 1 : -1); });
   document.addEventListener('dragover', e => e.preventDefault());
   document.addEventListener('drop', e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f && /\.(pptx|pdf)$/i.test(f.name)) openDeck(f); });
+  const toggleFS = () => { try { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => toast('請按鍵盤 F11 進入全螢幕')); } catch(e){ toast('請按鍵盤 F11 進入全螢幕'); } };
+  $('fsBtn').onclick = toggleFS;
+  document.addEventListener('fullscreenchange', () => { $('fsBtn').textContent = document.fullscreenElement ? '⛶ 離開全螢幕' : '⛶ 全螢幕'; });
   const toggleClean = () => document.body.classList.toggle('clean');
   $('cleanBtn').onclick = toggleClean; $('cleanExit').onclick = toggleClean;
   document.addEventListener('keydown', e => {
@@ -829,6 +832,7 @@ ${text}`;
     if (['ArrowRight','PageDown',' '].includes(e.key) && deck){ e.preventDefault(); go(1); }
     else if (['ArrowLeft','PageUp'].includes(e.key) && deck){ e.preventDefault(); go(-1); }
     else if (e.key === 'h' || e.key === 'H') toggleClean();
+    else if (e.key === 'f' || e.key === 'F') toggleFS();
   });
   let rsT; new ResizeObserver(() => { clearTimeout(rsT); rsT = setTimeout(renderDeck, 250); }).observe($('stage'));
 
